@@ -14,6 +14,7 @@ import { isManagementScheduleRole, isPastRegistrationDate, reactivationWaiverApp
 import { parseCustomShiftNote, scheduleShiftIdentity } from '@/lib/schedule/custom-shift'
 import { salaryAdvanceWindowState } from '@/lib/salary/advance-policy'
 import { FACTORY_IDS, FACTORY_LABELS, isFactoryId, type FactoryId } from '@/lib/models/factory'
+import { getManagementContactForFactory, syncManagementContact } from '@/lib/server/management-contact'
 
 type Shift = 'Morning' | 'Afternoon' | 'Evening'
 type ReviewStatus = 'Approved' | 'Rejected' | 'ChangesRequested'
@@ -169,26 +170,7 @@ export async function updateWeeklyScheduleTarget(actor: RequestActor, raw: unkno
 
 export async function getManagementContact(actor: RequestActor) {
   requireStaff(actor)
-  const snapshot = await adminDb.collection('employees')
-    .where('role', 'in', ['manager', 'admin'])
-    .get()
-  const managers = snapshot.docs
-    .map((document): Record<string, unknown> & { uid: string } => ({
-      uid: document.id,
-      ...(document.data() as Record<string, unknown>),
-    }))
-    .filter((employee) => ['manager', 'admin'].includes(String(employee.role)))
-    .sort((left, right) => Number(right.role === 'manager') - Number(left.role === 'manager'))
-  const contact = managers.find((employee) =>
-    (actor.role === 'director' || String(employee.factoryId || 'factory-1') === actor.factoryId) &&
-    typeof employee.facebookUrl === 'string' && /^https?:\/\//i.test(employee.facebookUrl)
-  )
-  return {
-    uid: contact?.uid || '',
-    fullName: contact && typeof contact.fullName === 'string' ? contact.fullName : 'Quản lý',
-    photoURL: contact && typeof contact.photoURL === 'string' ? contact.photoURL : '',
-    facebookUrl: contact && typeof contact.facebookUrl === 'string' ? contact.facebookUrl : '',
-  }
+  return getManagementContactForFactory(actor.factoryId)
 }
 
 function timestampIso(value: unknown): string | null {
@@ -434,12 +416,14 @@ export async function manageEmployeeRole(actor: RequestActor, raw: unknown) {
   if (employeeId === actor.uid) throw new ApiError(409, 'Host không thể tự thay đổi vai trò của mình.')
 
   const employeeRef = adminDb.collection('employees').doc(employeeId)
+  let changedFactoryId: FactoryId = 'factory-1'
   await adminDb.runTransaction(async (transaction) => {
     const employee = await transaction.get(employeeRef)
     if (!employee.exists) throw new ApiError(404, 'Không tìm thấy nhân viên.')
     const factoryId: FactoryId = isFactoryId(employee.get('factoryId'))
       ? employee.get('factoryId')
       : 'factory-1'
+    changedFactoryId = factoryId
     const currentRole = String(employee.get('role') || 'employee')
     if (currentRole === 'director') {
       throw new ApiError(409, 'Không thể thay đổi tài khoản Host bằng luồng phân quyền xưởng.')
@@ -496,6 +480,10 @@ export async function manageEmployeeRole(actor: RequestActor, raw: unknown) {
       roleChangedBy: actor.uid,
       roleChangedAt: now,
     }, { merge: true })
+  })
+
+  await syncManagementContact(changedFactoryId).catch((error) => {
+    console.error(`Management contact sync failed for ${changedFactoryId}:`, error)
   })
 
   return { employeeId, role }

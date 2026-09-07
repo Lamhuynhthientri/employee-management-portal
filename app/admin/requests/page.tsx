@@ -23,6 +23,7 @@ import { MonthNavigator } from '@/components/ui/month-navigator'
 import { invalidateMonthData, readPenaltyMonth } from '@/lib/services/monthDataService'
 import { currentVietnamMonth } from '@/lib/archive/retention'
 import { belongsToVietnamMonth, dateFromMonthValue } from '@/lib/services/monthDataUtils'
+import { LocalizedDateInput } from '@/components/ui/localized-date-input'
 
 type RequestType = 'leave' | 'late' | 'salary' | 'overtime' | 'note' | 'scheduleChange' | 'scheduleModeChange' | 'factoryChange'
 type RequestRow = {
@@ -588,7 +589,7 @@ export default function AdminRequestsPage() {
               )}
             </div>
             <label className="text-sm font-bold">Ngày ghi phạt
-              <input type="date" value={penaltyDate} onChange={(event) => { manualPenaltyRequestIdRef.current = null; setPenaltyDate(event.target.value) }} className="mobile-field mt-2" required />
+              <LocalizedDateInput value={penaltyDate} onChange={(value) => { manualPenaltyRequestIdRef.current = null; setPenaltyDate(value) }} className="mt-2" ariaLabel="Ngày ghi phạt" required />
             </label>
             <label className="text-sm font-bold sm:col-span-2">Số tiền phạt
               <input type="text" inputMode="numeric" pattern="[0-9 ]*" value={penaltyAmount} onChange={(event) => { manualPenaltyRequestIdRef.current = null; setPenaltyAmount(event.target.value.replace(/\D/g, '')); setPenaltyFormError('') }} className="mobile-field mt-2" placeholder="Ví dụ: 500 hoặc 1.000" required />

@@ -574,6 +574,11 @@ export function subscribeToManagementPendingItems(
     collection(db, collectionName),
     where('factoryId', '==', factoryId)
   )
+  const pendingFactoryQuery = (collectionName: string) => query(
+    collection(db, collectionName),
+    where('factoryId', '==', factoryId),
+    where('status', '==', 'Pending')
+  )
   const penaltyStart = new Date(nextMonday)
   penaltyStart.setDate(penaltyStart.getDate() - 14)
   penaltyStart.setHours(0, 0, 0, 0)
@@ -581,20 +586,22 @@ export function subscribeToManagementPendingItems(
 
   const unsubscribes = [
     watch('employees', factoryId ? factoryQuery('employees') : query(collection(db, 'employees'))),
-    watch('schedules', factoryId ? factoryQuery('workSchedules') : query(
+    watch('schedules', query(
       collection(db, 'workSchedules'),
+      ...(factoryId ? [where('factoryId', '==', factoryId)] : []),
       where('status', 'in', ['Pending', 'Registered']),
       where('date', '>=', Timestamp.fromDate(nextMonday)),
       where('date', '<=', Timestamp.fromDate(nextSunday)),
     )),
-    watch('leaveRequests', factoryId ? factoryQuery('leaveRequests') : pendingQuery('leaveRequests')),
-    watch('lateRequests', factoryId ? factoryQuery('lateRequests') : pendingQuery('lateRequests')),
-    watch('salaryAdvances', factoryId ? factoryQuery('salaryAdvances') : pendingQuery('salaryAdvances')),
-    watch('staffRequests', factoryId ? factoryQuery('staffRequests') : pendingQuery('staffRequests')),
+    watch('leaveRequests', factoryId ? pendingFactoryQuery('leaveRequests') : pendingQuery('leaveRequests')),
+    watch('lateRequests', factoryId ? pendingFactoryQuery('lateRequests') : pendingQuery('lateRequests')),
+    watch('salaryAdvances', factoryId ? pendingFactoryQuery('salaryAdvances') : pendingQuery('salaryAdvances')),
+    watch('staffRequests', factoryId ? pendingFactoryQuery('staffRequests') : pendingQuery('staffRequests')),
     // Keep current automatic/manual penalties available for schedule warnings
     // without replaying the complete penalty history on every manager page.
-    watch('penalties', factoryId ? factoryQuery('penalties') : query(
+    watch('penalties', query(
       collection(db, 'penalties'),
+      ...(factoryId ? [where('factoryId', '==', factoryId)] : []),
       where('penaltyDate', '>=', Timestamp.fromDate(penaltyStart)),
       where('penaltyDate', '<=', Timestamp.fromDate(penaltyEnd)),
       orderBy('penaltyDate', 'desc'),

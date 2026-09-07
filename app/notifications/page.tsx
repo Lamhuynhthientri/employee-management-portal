@@ -43,8 +43,8 @@ import {
   reviewWorkScheduleBatch,
 } from '@/lib/services/scheduleService'
 import { updateStaffRequestStatus } from '@/lib/services/staffRequestService'
-import { getManagementContact } from '@/lib/services/managementSettingsService'
 import { profileImageUrl } from '@/lib/utils/profileImage'
+import { useManagementContact } from '@/components/providers/management-contact-provider'
 import { subscribeToWeeklyDecisionHistory, type DecisionHistoryItem } from '@/lib/services/decisionHistoryService'
 import { setEmployeeAccountStatus, subscribeToAllEmployees } from '@/lib/services/employeeService'
 import type { Employee } from '@/lib/models/types'
@@ -79,8 +79,6 @@ const managementMeta = {
   salary: { icon: CircleDollarSign, color: 'bg-sky-600', gradient: 'from-sky-500 via-blue-600 to-indigo-600', soft: 'bg-sky-50 text-sky-800 dark:bg-sky-500/10 dark:text-sky-100' },
   staff: { icon: MessageSquareText, color: 'bg-fuchsia-600', gradient: 'from-fuchsia-500 via-violet-600 to-indigo-600', soft: 'bg-fuchsia-50 text-fuchsia-800 dark:bg-fuchsia-500/10 dark:text-fuchsia-100' },
 }
-
-type ManagementContact = Awaited<ReturnType<typeof getManagementContact>>
 
 const shiftNames = {
   Morning: 'Ca sáng',
@@ -133,16 +131,20 @@ function IdentityAvatar({
   photoURL,
   icon: Icon,
   color,
+  loading = false,
 }: {
   name: string
   photoURL?: string
   icon: typeof Bell
   color: string
+  loading?: boolean
 }) {
   return (
     <div className="relative h-12 w-12 shrink-0">
       <div className="grid h-12 w-12 place-items-center overflow-hidden rounded-2xl bg-slate-900 text-sm font-black text-white shadow-sm">
-        {photoURL
+        {loading
+          ? <span className="h-full w-full animate-pulse bg-slate-200 dark:bg-slate-700" aria-label="Đang tải ảnh đại diện" />
+          : photoURL
           ? <img src={profileImageUrl(photoURL)} alt={`Ảnh đại diện của ${name}`} width={48} height={48} decoding="async" className="h-full w-full object-cover" />
           : name ? initials(name) : <UserRound className="h-5 w-5" />}
       </div>
@@ -319,6 +321,7 @@ function ReviewAssessment({
 export default function NotificationsPage() {
   const router = useRouter()
   const { authUser, employee: currentEmployee, isPreviewMode } = useAuth()
+  const { contact: visibleManagementContact, ready: managementContactReady } = useManagementContact()
   const { employeeNotifications, employeeNotificationsReady, managementPendingItems, managementPendingReady } = useNotificationFeed()
   const role = useUserRole()
   const isManagement = role === 'admin' || role === 'manager' || role === 'director'
@@ -336,7 +339,6 @@ export default function NotificationsPage() {
   const [processingId, setProcessingId] = useState<string | null>(null)
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({})
   const [allowSundayResubmissionWithoutPenalty, setAllowSundayResubmissionWithoutPenalty] = useState(false)
-  const [managementContact, setManagementContact] = useState<ManagementContact | null>(null)
   const [decisions, setDecisions] = useState<DecisionHistoryItem[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [selectedDecision, setSelectedDecision] = useState<DecisionHistoryItem | null>(null)
@@ -485,17 +487,6 @@ export default function NotificationsPage() {
     setItems(employeeNotifications)
     if (employeeNotificationsReady) setLoading(false)
   }, [authUser?.uid, employeeNotifications, employeeNotificationsReady, isPreviewMode, role])
-
-  useEffect(() => {
-    if (!authUser || isManagement) return
-    if (isPreviewMode) {
-      setManagementContact({ uid: 'demo-admin-001', fullName: 'Quản lý Minh Sơn', photoURL: '', facebookUrl: '' })
-      return
-    }
-    void getManagementContact()
-      .then(setManagementContact)
-      .catch(() => setManagementContact({ uid: '', fullName: 'Quản lý', photoURL: '', facebookUrl: '' }))
-  }, [authUser, isManagement, isPreviewMode])
 
   useEffect(() => {
     setSelectedPending(null)
@@ -823,10 +814,11 @@ export default function NotificationsPage() {
                   }`}
                 >
                   <IdentityAvatar
-                    name={managementContact?.fullName || 'Quản lý'}
-                    photoURL={managementContact?.photoURL}
+                    name={visibleManagementContact?.fullName || 'Quản lý'}
+                    photoURL={visibleManagementContact?.photoURL}
                     icon={meta.icon}
                     color={meta.color}
+                    loading={!managementContactReady}
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
@@ -846,7 +838,7 @@ export default function NotificationsPage() {
               const meta = notificationMetaFor(item)
               return (
                 <button key={item.id} type="button" onClick={() => void openNotification(item)} className="mobile-card flex w-full gap-3 p-4 text-left">
-                  <IdentityAvatar name={managementContact?.fullName || 'Quản lý'} photoURL={managementContact?.photoURL} icon={meta.icon} color={meta.color} />
+                  <IdentityAvatar name={visibleManagementContact?.fullName || 'Quản lý'} photoURL={visibleManagementContact?.photoURL} icon={meta.icon} color={meta.color} loading={!managementContactReady} />
                   <div className="min-w-0 flex-1"><h2 className="font-extrabold">{item.title}</h2><p className="mt-1 text-sm text-muted-foreground">{item.message}</p><SubmissionStamp date={createdAt} /></div>
                   <ChevronRight className="mt-3 h-5 w-5 shrink-0 text-slate-400" />
                 </button>
@@ -1013,8 +1005,8 @@ export default function NotificationsPage() {
             <article className="overflow-hidden rounded-[2rem] bg-white shadow-xl shadow-slate-950/10 dark:bg-slate-900">
               <section className={`bg-gradient-to-br ${selectedNotificationMeta.gradient} p-5 text-white`}>
                 <div className="flex items-start gap-3">
-                  <IdentityAvatar name={managementContact?.fullName || 'Quản lý'} photoURL={managementContact?.photoURL} icon={selectedNotificationMeta.icon} color={selectedNotificationMeta.color} />
-                  <div className="min-w-0 flex-1"><p className="text-xs font-bold uppercase tracking-[0.14em] text-white/75">{managementContact?.fullName || 'Trí Candy'}</p><h2 className="mt-1 text-xl font-black leading-tight">{selectedNotification.title}</h2><p className="mt-2 text-xs font-semibold text-white/80">{(selectedNotification.createdAt instanceof Date ? selectedNotification.createdAt : selectedNotification.createdAt.toDate()).toLocaleDateString('vi-VN')} · {(selectedNotification.createdAt instanceof Date ? selectedNotification.createdAt : selectedNotification.createdAt.toDate()).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</p></div>
+                  <IdentityAvatar name={visibleManagementContact?.fullName || 'Quản lý'} photoURL={visibleManagementContact?.photoURL} icon={selectedNotificationMeta.icon} color={selectedNotificationMeta.color} loading={!managementContactReady} />
+                  <div className="min-w-0 flex-1"><p className="text-xs font-bold uppercase tracking-[0.14em] text-white/75">{visibleManagementContact?.fullName || 'Trí Candy'}</p><h2 className="mt-1 text-xl font-black leading-tight">{selectedNotification.title}</h2><p className="mt-2 text-xs font-semibold text-white/80">{(selectedNotification.createdAt instanceof Date ? selectedNotification.createdAt : selectedNotification.createdAt.toDate()).toLocaleDateString('vi-VN')} · {(selectedNotification.createdAt instanceof Date ? selectedNotification.createdAt : selectedNotification.createdAt.toDate()).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</p></div>
                 </div>
               </section>
               <section className="p-4"><p className="rounded-2xl bg-slate-50 p-4 text-sm font-medium leading-7 text-slate-700 dark:bg-slate-800 dark:text-slate-200">{selectedNotification.message}</p>{!isManagement && <button type="button" onClick={() => router.push(destinationFor(selectedNotification))} className={`mt-5 flex min-h-13 w-full items-center justify-between rounded-2xl bg-gradient-to-r ${selectedNotificationMeta.gradient} px-5 font-extrabold text-white shadow-lg`}><span>Mở biểu mẫu liên quan</span><ChevronRight className="h-5 w-5" /></button>}</section>

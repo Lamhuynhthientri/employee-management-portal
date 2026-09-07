@@ -35,7 +35,7 @@ import { addPreviewSchedules, getPreviewSchedules, updatePreviewSchedule } from 
 import type { WorkSchedule } from '@/lib/models/types'
 import { Header } from '@/components/layout/header'
 import { Badge } from '@/components/ui/badge'
-import { getManagementContact } from '@/lib/services/managementSettingsService'
+import { useManagementContact } from '@/components/providers/management-contact-provider'
 import { toMessengerUrl } from '@/lib/utils/messenger'
 import { scheduleShareText } from '@/lib/archive/retention'
 import { submitStaffRequest } from '@/lib/services/staffRequestService'
@@ -112,7 +112,8 @@ const valueDate = (value?: WorkSchedule['createdAt']) =>
 
 export default function SchedulePage() {
   const { authUser, employee, isPreviewMode } = useAuth()
-  const [managerFacebookUrl, setManagerFacebookUrl] = useState(process.env.NEXT_PUBLIC_MANAGER_FACEBOOK_URL?.trim() || '')
+  const { contact: managementContact } = useManagementContact()
+  const managerFacebookUrl = managementContact?.facebookUrl || process.env.NEXT_PUBLIC_MANAGER_FACEBOOK_URL?.trim() || ''
   const [selected, setSelected] = useState<Selection>({})
   const [original, setOriginal] = useState<Selection>({})
   const [customFor, setCustomFor] = useState<string | null>(null)
@@ -222,13 +223,6 @@ export default function SchedulePage() {
     setChangeMode(mode === 'change')
     setCurrentWeekMode(mode === 'change' ? weekday !== 0 : week === 'current' && weekday >= 1 && weekday <= 4)
   }, [])
-
-  useEffect(() => {
-    if (!authUser || isPreviewMode) return
-    void getManagementContact().then((contact) => {
-      if (contact.facebookUrl) setManagerFacebookUrl(contact.facebookUrl)
-    }).catch(() => undefined)
-  }, [authUser, isPreviewMode])
 
   useEffect(() => {
     if (!authUser) return

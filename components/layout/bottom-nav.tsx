@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { Badge } from '../ui/badge'
 
 interface NavItem {
@@ -21,8 +21,6 @@ interface BottomNavProps {
 const BottomNav = React.forwardRef<HTMLDivElement, BottomNavProps>(
   ({ items, className = '' }, ref) => {
     const pathname = usePathname()
-    const router = useRouter()
-    const hrefKey = items.map((item) => item.href).join('|')
     const [mounted, setMounted] = useState(false)
     const [navigating, setNavigating] = useState(false)
     const navigationTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -40,14 +38,6 @@ const BottomNav = React.forwardRef<HTMLDivElement, BottomNavProps>(
         navigationTimer.current = null
       }
     }, [pathname])
-
-    useEffect(() => {
-      if (!mounted) return
-      const hrefs = hrefKey.split('|').filter(Boolean)
-      const prefetch = () => hrefs.forEach((href) => router.prefetch(href))
-      const idle = window.setTimeout(prefetch, 500)
-      return () => window.clearTimeout(idle)
-    }, [hrefKey, mounted, router])
 
     const startNavigation = (href: string) => {
       if (href === pathname || href.startsWith(`${pathname}/`)) return
@@ -87,9 +77,6 @@ const BottomNav = React.forwardRef<HTMLDivElement, BottomNavProps>(
               <Link
                 key={item.href}
                 href={item.href}
-                prefetch
-                onPointerEnter={() => router.prefetch(item.href)}
-                onFocus={() => router.prefetch(item.href)}
                 onClick={() => startNavigation(item.href)}
                 className={`group relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 transition-all duration-200 md:flex-row md:gap-2.5 md:px-4 xl:justify-start xl:rounded-xl xl:px-3 ${
                   isActive

@@ -1,6 +1,7 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import { ThemeProvider } from '@/components/providers/theme-provider'
+import { ManagementContactProvider } from '@/components/providers/management-contact-provider'
 import { SkipLoginFAB } from '@/components/demo/skip-login-fab'
 import { ForegroundNotificationListener } from '@/components/notifications/foreground-notification-listener'
 import { NotificationFeedProvider } from '@/components/notifications/notification-feed-provider'
@@ -61,16 +62,18 @@ export default function RootLayout({
       <body className="antialiased">
         <ThemeProvider>
           <AuthProvider>
-            <NotificationFeedProvider>
-              <SkipLoginFAB />
-              <ServiceWorkerRegistrar />
-              <ForegroundNotificationListener />
-              <ProfileCompletionGuard>
-                <NotificationPermissionGate>{children}</NotificationPermissionGate>
-              </ProfileCompletionGuard>
-              <InstallAppPrompt />
-              <PersistentBottomNav />
-            </NotificationFeedProvider>
+            <ManagementContactProvider>
+              <NotificationFeedProvider>
+                <SkipLoginFAB />
+                <ServiceWorkerRegistrar />
+                <ForegroundNotificationListener />
+                <ProfileCompletionGuard>
+                  <NotificationPermissionGate>{children}</NotificationPermissionGate>
+                </ProfileCompletionGuard>
+                <InstallAppPrompt />
+                <PersistentBottomNav />
+              </NotificationFeedProvider>
+            </ManagementContactProvider>
             {process.env.NODE_ENV === 'production' && <Analytics />}
           </AuthProvider>
         </ThemeProvider>

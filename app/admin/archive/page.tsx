@@ -20,6 +20,7 @@ import {
 import { Header } from '@/components/layout/header'
 import { PageContainer } from '@/components/layout/page-container'
 import { Badge } from '@/components/ui/badge'
+import { LocalizedDateInput } from '@/components/ui/localized-date-input'
 import { useAuth, useUserRole } from '@/lib/hooks/useAuth'
 import {
   listArchiveFiles,
@@ -644,7 +645,7 @@ export default function AdminArchivePage() {
 
         <details className="group mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <summary className="flex cursor-pointer list-none items-center gap-3 p-4"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10"><FlaskConical className="h-4 w-4" /></div><div className="min-w-0 flex-1"><h2 className="text-sm font-extrabold">Công cụ kiểm thử</h2><p className="mt-0.5 text-xs text-muted-foreground">Tạo bản thử bằng ngày lùi khi cần kiểm tra.</p></div><ChevronDown className="h-5 w-5 text-slate-400 transition group-open:rotate-180" /></summary>
-          <div className="border-t border-slate-100 p-4 dark:border-white/10"><p className="text-xs leading-5 text-muted-foreground">Tạo bù tháng trước dùng đúng quy trình Drive → xác minh → reset. File test tuần không xóa Firebase.</p><button type="button" onClick={() => void createPreviousMonthArchive()} disabled={archivingMonth || isPreviewMode} className="mt-3 flex min-h-12 w-full items-center justify-center rounded-2xl bg-emerald-600 px-4 text-sm font-bold text-white disabled:opacity-50">{archivingMonth ? 'Đang lưu tháng trước...' : 'Lưu tháng trước ngay'}</button><input type="date" value={testDate} onChange={(event) => setTestDate(event.target.value)} className="mobile-field mt-3 min-w-0 !px-4 text-sm" /><button type="button" onClick={() => void createTestArchive()} disabled={creatingTest || isPreviewMode} className="mt-2 flex min-h-12 w-full items-center justify-center rounded-2xl bg-indigo-600 px-4 text-sm font-bold text-white disabled:opacity-50">{creatingTest ? 'Đang tạo...' : 'Tạo bản thử tuần'}</button></div>
+          <div className="border-t border-slate-100 p-4 dark:border-white/10"><p className="text-xs leading-5 text-muted-foreground">Tạo bù tháng trước dùng đúng quy trình Drive → xác minh → reset. File test tuần không xóa Firebase.</p><button type="button" onClick={() => void createPreviousMonthArchive()} disabled={archivingMonth || isPreviewMode} className="mt-3 flex min-h-12 w-full items-center justify-center rounded-2xl bg-emerald-600 px-4 text-sm font-bold text-white disabled:opacity-50">{archivingMonth ? 'Đang lưu tháng trước...' : 'Lưu tháng trước ngay'}</button><LocalizedDateInput value={testDate} onChange={setTestDate} className="mt-3 min-w-0 !px-4 text-sm" ariaLabel="Ngày tạo bản thử tuần" /><button type="button" onClick={() => void createTestArchive()} disabled={creatingTest || isPreviewMode} className="mt-2 flex min-h-12 w-full items-center justify-center rounded-2xl bg-indigo-600 px-4 text-sm font-bold text-white disabled:opacity-50">{creatingTest ? 'Đang tạo...' : 'Tạo bản thử tuần'}</button></div>
         </details>
       </PageContainer>
 

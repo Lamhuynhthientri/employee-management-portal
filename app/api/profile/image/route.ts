@@ -10,6 +10,7 @@ import {
   storeProfileImage,
 } from '@/lib/server/google-drive-archive'
 import { invalidateMonthDataCache } from '@/lib/server/month-data-cache'
+import { syncManagementContactForProfile } from '@/lib/server/management-contact'
 
 export const runtime = 'nodejs'
 
@@ -32,6 +33,7 @@ export async function POST(request: Request) {
     const token = await adminAuth.verifyIdToken(authorization.slice(7), true)
     const profileRef = adminDb.collection('employees').doc(token.uid)
     const profile = await profileRef.get()
+    const profileData = profile.data()
     const form = await request.formData()
     const image = form.get('image')
     if (!(image instanceof File)) {
@@ -61,6 +63,10 @@ export async function POST(request: Request) {
       })
       throw error
     }
+
+    await syncManagementContactForProfile({ ...profileData, photoURL }).catch((error) => {
+      console.error('Management contact image sync failed:', error)
+    })
 
     await adminAuth.updateUser(token.uid, { photoURL }).catch((error) => {
       console.error('Firebase Auth profile image sync failed:', error)

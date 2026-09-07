@@ -4,6 +4,7 @@ import { ApiError, authenticateRequest } from '@/lib/server/api-auth'
 import { adminAuth, adminDb } from '@/lib/server/firebase-admin'
 import { invalidateMonthDataCache } from '@/lib/server/month-data-cache'
 import { DEFAULT_PROFILE_IMAGE, isProfileImageUrl } from '@/lib/utils/profileImage'
+import { syncManagementContactForProfile } from '@/lib/server/management-contact'
 
 export const runtime = 'nodejs'
 
@@ -83,6 +84,9 @@ export async function POST(request: Request) {
     }
 
     await profileRef.update({ ...updates, updatedAt: FieldValue.serverTimestamp() })
+    await syncManagementContactForProfile({ ...current, ...updates }).catch((error) => {
+      console.error('Management contact profile sync failed:', error)
+    })
     invalidateMonthDataCache()
     const authPhotoURL = new URL(photoURL, request.url).toString()
     await adminAuth.updateUser(actor.uid, { displayName: fullName, photoURL: authPhotoURL }).catch((error) => {

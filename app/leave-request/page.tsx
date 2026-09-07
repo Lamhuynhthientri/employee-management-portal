@@ -11,6 +11,7 @@ import { Header } from '@/components/layout/header'
 import { PageContainer } from '@/components/layout/page-container'
 import { StaffBanner } from '@/components/staff/staff-banner'
 import { Badge } from '@/components/ui/badge'
+import { LocalizedDateInput } from '@/components/ui/localized-date-input'
 
 type Duration = 'short' | 'long'
 type ApprovedShift = { id: string; date: Date; shift: 'Morning' | 'Afternoon' | 'Evening' }
@@ -283,11 +284,11 @@ export default function LeaveRequestPage() {
               <div className="mt-5 grid min-w-0 grid-cols-1 gap-3 overflow-hidden sm:grid-cols-2">
                 <label className="block min-w-0 max-w-full overflow-hidden text-sm font-bold">
                   Từ ngày
-                  <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="mobile-field mt-2 block min-w-0 max-w-full overflow-hidden !px-3" required />
+                  <LocalizedDateInput value={startDate} onChange={setStartDate} className="mt-2 min-w-0 max-w-full !px-3" ariaLabel="Ngày bắt đầu nghỉ" required />
                 </label>
               <label className="block min-w-0 max-w-full overflow-hidden text-sm font-bold">
                 Đến ngày
-                <input type="date" value={endDate} min={startDate} onChange={(e) => setEndDate(e.target.value)} className="mobile-field mt-2 block min-w-0 max-w-full overflow-hidden !px-3" required />
+                <LocalizedDateInput value={endDate} min={startDate} onChange={setEndDate} className="mt-2 min-w-0 max-w-full !px-3" ariaLabel="Ngày kết thúc nghỉ" required />
               </label>
               </div>
               {!!longLeaveShifts.length && (
