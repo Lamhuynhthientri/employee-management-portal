@@ -4,6 +4,7 @@ import { authenticateRequest } from '@/lib/server/api-auth'
 import { listWeeklyArchives, readWeeklyArchive } from '@/lib/server/google-drive-archive'
 import { shiftLabel, statusLabel } from '@/lib/server/word-report'
 import { scopeArchivePayload } from '@/lib/server/archive-scope'
+import { resolveFactoryScope } from '@/lib/server/factory-scope'
 import {
   configureReportSheet,
   REPORT_XLSX_CONTENT_TYPE,
@@ -141,11 +142,13 @@ export async function GET(request: Request) {
     if (!['admin', 'manager', 'director'].includes(actor.role)) {
       return NextResponse.json({ error: 'Bạn không có quyền xuất kho dữ liệu.' }, { status: 403 })
     }
-    const month = new URL(request.url).searchParams.get('month') || ''
+    const params = new URL(request.url).searchParams
+    const month = params.get('month') || ''
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
       return NextResponse.json({ error: 'Tháng không hợp lệ.' }, { status: 400 })
     }
 
+    const factoryId = resolveFactoryScope(actor, params.get('factory'))
     const files = await listWeeklyArchives()
     const canonical = new Map<string, typeof files[number]>()
     files.filter((file) => fileTouchesMonth(file.archiveKey, month)).forEach((file) => {
@@ -159,7 +162,7 @@ export async function GET(request: Request) {
       readWeeklyArchive(file.id) as Promise<ArchivePayload>
     ))
     const records = new Map<string, Map<string, ArchiveRecord>>()
-    payloads.forEach((payload) => Object.entries(scopeArchivePayload(actor, payload).records || {}).forEach(([collection, rows]) => {
+    payloads.forEach((payload) => Object.entries(scopeArchivePayload(actor, payload, factoryId).records || {}).forEach(([collection, rows]) => {
       const target = records.get(collection) || new Map<string, ArchiveRecord>()
       rows.filter((record) => belongsToMonth(collection, record.data || {}, month))
         .forEach((record) => target.set(record.id, record))
@@ -300,7 +303,7 @@ export async function GET(request: Request) {
     return new Response(buffer, {
       headers: {
         'content-type': REPORT_XLSX_CONTENT_TYPE,
-        'content-disposition': `attachment; filename="kho-du-lieu-${month}.xlsx"`,
+        'content-disposition': `attachment; filename="kho-du-lieu-${factoryId}-${month}.xlsx"`,
         'cache-control': 'no-store',
       },
     })

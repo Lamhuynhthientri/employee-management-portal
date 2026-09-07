@@ -13,7 +13,8 @@ import { updateStaffRequestStatus } from '@/lib/services/staffRequestService'
 import { restoreAdminCancelledWorkSchedules, reviewWorkScheduleBatch } from '@/lib/services/scheduleService'
 import { subscribeToWeeklyDecisionHistory, type DecisionHistoryItem, type DecisionStatus } from '@/lib/services/decisionHistoryService'
 import type { Employee } from '@/lib/models/types'
-import { employeeFactoryId } from '@/lib/models/factory'
+import { useManagementFactory } from '@/lib/hooks/useManagementFactory'
+import { FactorySwitcher } from '@/components/admin/factory-switcher'
 
 function startOfWeek(offset = 0): Date {
   const date = new Date()
@@ -55,8 +56,9 @@ function previewHistory(): DecisionHistoryItem[] {
 }
 
 export default function DecisionHistoryPage() {
-  const { authUser, employee: currentEmployee, isPreviewMode } = useAuth()
+  const { authUser, isPreviewMode } = useAuth()
   const role = useUserRole()
+  const { factoryId, setFactoryId } = useManagementFactory()
   const [weekOffset, setWeekOffset] = useState(0)
   const [items, setItems] = useState<DecisionHistoryItem[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -69,7 +71,7 @@ export default function DecisionHistoryPage() {
   const [message, setMessage] = useState('')
   const weekStart = useMemo(() => startOfWeek(weekOffset), [weekOffset])
   const weekEnd = useMemo(() => endOfWeek(weekStart), [weekStart])
-  const factoryScope = role === 'director' ? undefined : employeeFactoryId(currentEmployee)
+  const factoryScope = factoryId
 
   useEffect(() => {
     if (!authUser) return
@@ -186,6 +188,7 @@ export default function DecisionHistoryPage() {
     <main className="min-h-screen pb-8">
       <Header title="Lịch sử xử lý" subtitle="Giữ tuần này và tuần trước" />
       <PageContainer>
+        <FactorySwitcher factoryId={factoryId} onChange={setFactoryId} canSelect={role === 'director'} />
         <section className="rounded-3xl border border-slate-200 bg-white p-3 shadow-sm dark:border-white/10 dark:bg-slate-900">
           <div className="flex items-center gap-2">
             <button type="button" disabled={weekOffset <= -1} onClick={() => setWeekOffset(-1)} className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-slate-100 text-slate-600 disabled:opacity-30 dark:bg-slate-800 dark:text-slate-200" aria-label="Tuần trước"><ChevronLeft className="h-5 w-5" /></button>

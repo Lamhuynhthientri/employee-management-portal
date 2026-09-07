@@ -33,6 +33,8 @@ import {
   type WeeklyArchivePayload,
 } from '@/lib/services/archiveService'
 import { auth } from '@/lib/firebase'
+import { useManagementFactory } from '@/lib/hooks/useManagementFactory'
+import { FactorySwitcher } from '@/components/admin/factory-switcher'
 
 const collectionLabels: Record<string, string> = {
   workSchedules: 'Lịch làm',
@@ -214,6 +216,7 @@ function canonicalFiles(files: ArchiveFileSummary[]) {
 export default function AdminArchivePage() {
   const { authUser, isPreviewMode } = useAuth()
   const role = useUserRole()
+  const { factoryId, setFactoryId } = useManagementFactory()
   const [files, setFiles] = useState<ArchiveFileSummary[]>([])
   const [selected, setSelected] = useState<ArchiveFileSummary | null>(null)
   const [archive, setArchive] = useState<WeeklyArchivePayload | null>(null)
@@ -242,6 +245,13 @@ export default function AdminArchivePage() {
   const filterRequestIdRef = useRef(0)
   const visibleFiles = useMemo(() => canonicalFiles(files), [files])
   const currentMonthKey = vietnamMonthKey(new Date())
+
+  useEffect(() => {
+    setSelected(null)
+    setArchive(null)
+    setFilterResults([])
+    archiveCache.current.clear()
+  }, [factoryId])
 
   const loadFiles = useCallback(async () => {
     if (!authUser) return
@@ -341,12 +351,13 @@ export default function AdminArchivePage() {
   }
 
   const getArchive = useCallback(async (file: ArchiveFileSummary) => {
-    const cached = archiveCache.current.get(file.id)
+    const cacheKey = `${factoryId}:${file.id}`
+    const cached = archiveCache.current.get(cacheKey)
     if (cached) return cached
-    const result = await readArchiveFile(file.id)
-    archiveCache.current.set(file.id, result)
+    const result = await readArchiveFile(file.id, factoryId)
+    archiveCache.current.set(cacheKey, result)
     return result
-  }, [])
+  }, [factoryId])
 
   const openArchive = async (file: ArchiveFileSummary) => {
     if (selected?.id === file.id && archive) {
@@ -416,7 +427,7 @@ export default function AdminArchivePage() {
     try {
       const monthFiles = canonicalFiles(files.filter((file) => fileTouchesMonth(file, nextFilter.month)))
       const currentMonth = vietnamMonthKey(new Date())
-      const liveSnapshot = nextFilter.month === currentMonth && !isPreviewMode ? await readCurrentMonthSnapshot(nextFilter.month) : null
+      const liveSnapshot = nextFilter.month === currentMonth && !isPreviewMode ? await readCurrentMonthSnapshot(nextFilter.month, factoryId) : null
       const driveSnapshots = await Promise.all(monthFiles.map(async (file) => ({ file, archive: await getArchive(file) })))
       const loaded: Array<{ file: ArchiveFileSummary | null; archive: WeeklyArchivePayload }> = [
         ...(liveSnapshot ? [{ file: null, archive: liveSnapshot }] : []),
@@ -478,7 +489,7 @@ export default function AdminArchivePage() {
     } finally {
       if (requestId === filterRequestIdRef.current) setFiltering(false)
     }
-  }, [files, getArchive, isPreviewMode])
+  }, [factoryId, files, getArchive, isPreviewMode])
 
   useEffect(() => {
     if (!selectedBrowseMonth || loading) return
@@ -526,7 +537,7 @@ export default function AdminArchivePage() {
     try {
       const token = await auth.currentUser?.getIdToken()
       if (!token) throw new Error('Bạn cần đăng nhập lại.')
-      const response = await fetch(`/api/exports/archive-month?month=${encodeURIComponent(selectedBrowseMonth)}`, {
+      const response = await fetch(`/api/exports/archive-month?month=${encodeURIComponent(selectedBrowseMonth)}&factory=${encodeURIComponent(factoryId)}`, {
         headers: { authorization: `Bearer ${token}` },
       })
       if (!response.ok) throw new Error('Chưa thể xuất dữ liệu tháng.')
@@ -534,7 +545,7 @@ export default function AdminArchivePage() {
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = url
-      anchor.download = `kho-du-lieu-${selectedBrowseMonth}.xlsx`
+      anchor.download = `kho-du-lieu-${factoryId}-${selectedBrowseMonth}.xlsx`
       anchor.click()
       URL.revokeObjectURL(url)
     } catch (error) {
@@ -586,6 +597,7 @@ export default function AdminArchivePage() {
     <main className="min-h-screen pb-28">
       <Header title="Kho dữ liệu" subtitle="Lịch sử dữ liệu đã lưu" />
       <PageContainer maxWidth="2xl">
+        <FactorySwitcher factoryId={factoryId} onChange={setFactoryId} canSelect={role === 'director'} />
         <section className="overflow-hidden rounded-[1.75rem] bg-slate-950 p-4 text-white shadow-xl shadow-slate-950/15">
           <div className="flex items-start gap-3">
             <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-indigo-600"><Archive className="h-5 w-5" /></div>

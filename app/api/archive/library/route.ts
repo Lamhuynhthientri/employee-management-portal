@@ -6,6 +6,7 @@ import { runMonthlyArchive } from '@/lib/server/monthly-archive'
 import { getCurrentMonthSnapshot } from '@/lib/server/current-month-snapshot'
 import { invalidateMonthDataCache } from '@/lib/server/month-data-cache'
 import { scopeArchivePayload, type ArchivePayload } from '@/lib/server/archive-scope'
+import { resolveFactoryScope } from '@/lib/server/factory-scope'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -18,11 +19,13 @@ export async function GET(request: Request) {
     const searchParams = new URL(request.url).searchParams
     const fileId = searchParams.get('fileId')?.trim()
     const liveMonth = searchParams.get('liveMonth')?.trim()
+    const factory = searchParams.get('factory')?.trim()
+    const scopedFactory = factory ? resolveFactoryScope(actor, factory) : null
     if (liveMonth && !/^\d{4}-\d{2}$/.test(liveMonth)) throw new ApiError(400, 'Tháng cần có định dạng YYYY-MM.')
     const result = fileId
-      ? scopeArchivePayload(actor, await readArchive(fileId) as ArchivePayload)
+      ? scopeArchivePayload(actor, await readArchive(fileId) as ArchivePayload, scopedFactory)
       : liveMonth
-        ? scopeArchivePayload(actor, await getCurrentMonthSnapshot(liveMonth))
+        ? scopeArchivePayload(actor, await getCurrentMonthSnapshot(liveMonth), scopedFactory)
         : await listAllArchives()
     return NextResponse.json({ ok: true, result })
   } catch (error) {

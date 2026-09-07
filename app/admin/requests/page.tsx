@@ -18,12 +18,14 @@ import { adjustPenalty, cancelPenalty, createManualPenalty, subscribeToAllPenalt
 import { newWorkflowRequestId } from '@/lib/services/workflowApi'
 import { subscribeToPendingStaffRequests, updateStaffRequestStatus } from '@/lib/services/staffRequestService'
 import type { Employee, Penalty, StaffRequest } from '@/lib/models/types'
-import { employeeFactoryId, FACTORY_LABELS } from '@/lib/models/factory'
+import { FACTORY_LABELS } from '@/lib/models/factory'
 import { MonthNavigator } from '@/components/ui/month-navigator'
 import { invalidateMonthData, readPenaltyMonth } from '@/lib/services/monthDataService'
 import { currentVietnamMonth } from '@/lib/archive/retention'
 import { belongsToVietnamMonth, dateFromMonthValue } from '@/lib/services/monthDataUtils'
 import { LocalizedDateInput } from '@/components/ui/localized-date-input'
+import { useManagementFactory } from '@/lib/hooks/useManagementFactory'
+import { FactorySwitcher } from '@/components/admin/factory-switcher'
 
 type RequestType = 'leave' | 'late' | 'salary' | 'overtime' | 'note' | 'scheduleChange' | 'scheduleModeChange' | 'factoryChange'
 type RequestRow = {
@@ -135,6 +137,8 @@ function buildRequestRows(
 
 export default function AdminRequestsPage() {
   const { authUser, employee: currentEmployee, isPreviewMode } = useAuth()
+  const role = currentEmployee?.role || null
+  const { factoryId, setFactoryId } = useManagementFactory()
   const [filter, setFilter] = useState<'all' | RequestType>('all')
   const [rows, setRows] = useState<RequestRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -165,7 +169,7 @@ export default function AdminRequestsPage() {
   const [penaltyExportMonth, setPenaltyExportMonth] = useState(currentVietnamMonth(new Date()).key)
   const [exportingPenalties, setExportingPenalties] = useState(false)
   const [penaltyMonthLoading, setPenaltyMonthLoading] = useState(true)
-  const factoryScope = currentEmployee?.role === 'director' ? undefined : employeeFactoryId(currentEmployee)
+  const factoryScope = factoryId
 
   useEffect(() => {
     if (!rejectingRow && !editingPenalty) return
@@ -277,7 +281,7 @@ export default function AdminRequestsPage() {
       : undefined
     setPenalties([])
     setPenaltyMonthLoading(true)
-    void readPenaltyMonth(penaltyExportMonth)
+      void readPenaltyMonth(penaltyExportMonth, factoryId)
       .then((result) => {
         if (!active) return
         sourceRecords = result.records
@@ -295,7 +299,7 @@ export default function AdminRequestsPage() {
       active = false
       unsubscribe?.()
     }
-  }, [authUser, factoryScope, isPreviewMode, pageMode, penaltyExportMonth])
+  }, [authUser, factoryId, factoryScope, isPreviewMode, pageMode, penaltyExportMonth])
 
   useEffect(() => {
     if (!manualPenaltyOpen) return
@@ -377,7 +381,7 @@ export default function AdminRequestsPage() {
         const result = await createManualPenalty(penaltyEmployeeId, `${penaltyDate}T12:00:00`, amount, penaltyNote.trim(), requestId)
         createdPenalty.id = result.id
         invalidateMonthData('penalties', penaltyExportMonth)
-        const refreshed = await readPenaltyMonth(penaltyExportMonth)
+        const refreshed = await readPenaltyMonth(penaltyExportMonth, factoryId)
         setPenalties(refreshed.records)
       } else {
         setPenalties((current) => [createdPenalty, ...current])
@@ -403,7 +407,7 @@ export default function AdminRequestsPage() {
     try {
       const token = await auth.currentUser?.getIdToken()
       if (!token) throw new Error('Phiên đăng nhập đã hết hạn.')
-      const response = await fetch(`/api/exports/penalties?month=${encodeURIComponent(penaltyExportMonth)}`, {
+      const response = await fetch(`/api/exports/penalties?month=${encodeURIComponent(penaltyExportMonth)}&factory=${encodeURIComponent(factoryId)}`, {
         headers: { authorization: `Bearer ${token}` },
       })
       if (!response.ok) {
@@ -414,7 +418,7 @@ export default function AdminRequestsPage() {
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = url
-      anchor.download = `bang-phat-${penaltyExportMonth}.xlsx`
+      anchor.download = `bang-phat-${factoryId}-${penaltyExportMonth}.xlsx`
       anchor.click()
       URL.revokeObjectURL(url)
     } catch (error) {
@@ -492,6 +496,7 @@ export default function AdminRequestsPage() {
     <main className="min-h-screen pb-8">
       <Header title={pageMode === 'penalties' ? 'Quản lý phạt' : 'Yêu cầu khác'} subtitle={pageMode === 'penalties' ? 'Theo dõi theo nhân viên và từng khoản phạt' : 'Tất cả yêu cầu ngoài lịch đăng ký tuần'} />
       <PageContainer>
+        <FactorySwitcher factoryId={factoryId} onChange={setFactoryId} canSelect={role === 'director'} />
         {pageMode === 'penalties' && <MonthNavigator value={penaltyExportMonth} onChange={setPenaltyExportMonth} loading={penaltyMonthLoading} />}
         {pageMode === 'requests' && <ManagementOverview employees={employees} />}
         <div className="flex flex-col">

@@ -1,4 +1,5 @@
 import { auth } from '@/lib/firebase'
+import type { FactoryId } from '@/lib/models/factory'
 
 export interface ArchiveFileSummary {
   id: string
@@ -31,11 +32,14 @@ export interface WeeklyArchivePayload {
   records: Record<string, ArchivedRecord[]>
 }
 
-async function archiveRequest<T>(fileId?: string): Promise<T> {
+async function archiveRequest<T>(fileId?: string, factoryId?: FactoryId): Promise<T> {
   const user = auth.currentUser
   if (!user) throw new Error('Bạn cần đăng nhập để mở kho dữ liệu.')
   const token = await user.getIdToken()
-  const suffix = fileId ? `?fileId=${encodeURIComponent(fileId)}` : ''
+  const params = new URLSearchParams()
+  if (fileId) params.set('fileId', fileId)
+  if (factoryId) params.set('factory', factoryId)
+  const suffix = params.toString() ? `?${params.toString()}` : ''
   const response = await fetch(`/api/archive/library${suffix}`, {
     headers: { authorization: `Bearer ${token}` },
     cache: 'no-store',
@@ -54,15 +58,16 @@ export function listArchiveFiles(): Promise<ArchiveFileSummary[]> {
   return archiveRequest<ArchiveFileSummary[]>()
 }
 
-export function readArchiveFile(fileId: string): Promise<WeeklyArchivePayload> {
-  return archiveRequest<WeeklyArchivePayload>(fileId)
+export function readArchiveFile(fileId: string, factoryId?: FactoryId): Promise<WeeklyArchivePayload> {
+  return archiveRequest<WeeklyArchivePayload>(fileId, factoryId)
 }
 
-export function readCurrentMonthSnapshot(month: string): Promise<WeeklyArchivePayload> {
+export function readCurrentMonthSnapshot(month: string, factoryId?: FactoryId): Promise<WeeklyArchivePayload> {
   const user = auth.currentUser
   if (!user) return Promise.reject(new Error('Bạn cần đăng nhập để đọc dữ liệu hiện tại.'))
   return user.getIdToken().then(async (token) => {
-    const response = await fetch(`/api/archive/library?liveMonth=${encodeURIComponent(month)}`, {
+    const factoryQuery = factoryId ? `&factory=${encodeURIComponent(factoryId)}` : ''
+    const response = await fetch(`/api/archive/library?liveMonth=${encodeURIComponent(month)}${factoryQuery}`, {
       headers: { authorization: `Bearer ${token}` },
       cache: 'no-store',
     })

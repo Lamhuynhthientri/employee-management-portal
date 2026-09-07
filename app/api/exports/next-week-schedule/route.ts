@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { ApiError, authenticateRequest } from '@/lib/server/api-auth'
 import { adminDb } from '@/lib/server/firebase-admin'
+import { resolveFactoryScope } from '@/lib/server/factory-scope'
 
 export const runtime = 'nodejs'
 
@@ -126,6 +127,7 @@ export async function GET(request: Request) {
     if (!['admin', 'manager', 'director'].includes(actor.role)) {
       return NextResponse.json({ error: 'Chỉ tài khoản quản trị được xuất lịch nhân sự.' }, { status: 403 })
     }
+    const factoryId = resolveFactoryScope(actor, new URL(request.url).searchParams.get('factory'))
 
     const bounds = currentWeekBounds()
     const [employeeSnapshot, scheduleSnapshot] = await Promise.all([
@@ -139,7 +141,7 @@ export async function GET(request: Request) {
     const employees: EmployeeRecord[] = employeeSnapshot.docs
       .map((snapshot) => ({ uid: snapshot.id, ...snapshot.data() }) as EmployeeRecord)
       .filter((employee) => employee.status === 'active')
-      .filter((employee) => actor.role === 'director' || String(employee.factoryId || 'factory-1') === actor.factoryId)
+      .filter((employee) => String(employee.factoryId || 'factory-1') === factoryId)
       .sort((left, right) => {
         const codeOrder = String(left.employeeCode || '').localeCompare(String(right.employeeCode || ''), 'vi', { numeric: true })
         return codeOrder || String(left.fullName || '').localeCompare(String(right.fullName || ''), 'vi')
@@ -332,7 +334,7 @@ export async function GET(request: Request) {
     return new Response(buffer, {
       headers: {
         'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'content-disposition': `attachment; filename="lich-nhan-su-tuan-nay-${fileDate}.xlsx"`,
+        'content-disposition': `attachment; filename="lich-nhan-su-tuan-nay-${factoryId}-${fileDate}.xlsx"`,
         'cache-control': 'no-store',
       },
     })

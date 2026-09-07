@@ -156,9 +156,12 @@ export async function updateEmployee(uid: string, updates: Partial<Omit<Employee
 /**
  * Get all employees (admin only)
  */
-export async function getAllEmployees(): Promise<Employee[]> {
+export async function getAllEmployees(factoryId?: FactoryId): Promise<Employee[]> {
   try {
-    const querySnapshot = await getDocs(collection(db, EMPLOYEES_COLLECTION))
+    const source = factoryId
+      ? query(collection(db, EMPLOYEES_COLLECTION), where('factoryId', '==', factoryId))
+      : collection(db, EMPLOYEES_COLLECTION)
+    const querySnapshot = await getDocs(source)
     return querySnapshot.docs.map((doc) => doc.data() as Employee)
   } catch (error) {
     console.error('Error fetching employees:', error)

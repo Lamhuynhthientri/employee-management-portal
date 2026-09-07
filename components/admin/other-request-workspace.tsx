@@ -7,12 +7,12 @@ import type { Employee } from '@/lib/models/types'
 import { useNotificationFeed } from '@/components/notifications/notification-feed-provider'
 import { updateLateStatus } from '@/lib/services/lateService'
 import { updateLeaveStatus } from '@/lib/services/leaveService'
-import { type ManagementPendingItem, type ManagementShift } from '@/lib/services/notificationService'
+import { subscribeToManagementPendingItems, type ManagementPendingItem, type ManagementShift } from '@/lib/services/notificationService'
 import { updateSalaryAdvanceStatus } from '@/lib/services/salaryService'
 import { updateStaffRequestStatus } from '@/lib/services/staffRequestService'
 import { subscribeToWeeklyDecisionHistory, type DecisionHistoryItem } from '@/lib/services/decisionHistoryService'
 import { RequestIdentityAvatar } from '@/components/admin/request-identity-avatar'
-import { employeeFactoryId } from '@/lib/models/factory'
+import { employeeFactoryId, type FactoryId } from '@/lib/models/factory'
 import { isRequestOverdue, requestTimingLabel } from '@/lib/requests/request-timing'
 
 type RequestRow =
@@ -81,7 +81,7 @@ function decisionFromPending(
   }
 }
 
-export function OtherRequestWorkspace({ employees }: { employees: Employee[] }) {
+export function OtherRequestWorkspace({ employees, factoryId }: { employees: Employee[]; factoryId: FactoryId }) {
   const { authUser, employee: currentEmployee, isPreviewMode } = useAuth()
   const { managementPendingItems, managementPendingReady } = useNotificationFeed()
   const [pending, setPending] = useState<ManagementPendingItem[]>([])
@@ -132,6 +132,17 @@ export function OtherRequestWorkspace({ employees }: { employees: Employee[] }) 
     )
     return () => unsubscribeHistory()
   }, [authUser, currentEmployee, isPreviewMode])
+
+  // Keep Host usage scoped to this workspace and the selected factory. The
+  // global feed does not maintain a permanent Host management listener.
+  useEffect(() => {
+    if (!authUser || isPreviewMode || currentEmployee?.role !== 'director') return
+    return subscribeToManagementPendingItems(
+      (items) => setPending(items.filter((item) => item.type !== 'schedule' && item.type !== 'account')),
+      () => setMessage('Chưa thể tải yêu cầu của xưởng đang chọn.'),
+      factoryId,
+    )
+  }, [authUser, currentEmployee?.role, factoryId, isPreviewMode])
 
   useEffect(() => {
     if (!authUser || isPreviewMode || !managementPendingReady) return

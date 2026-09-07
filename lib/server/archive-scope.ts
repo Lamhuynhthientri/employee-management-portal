@@ -1,4 +1,5 @@
 import type { RequestActor } from '@/lib/server/api-auth'
+import { isFactoryId, type FactoryId } from '@/lib/models/factory'
 
 export type ArchiveRecord = {
   id: string
@@ -29,8 +30,12 @@ function belongsToFactory(record: ArchiveRecord, factoryId: string, allowedEmplo
  * inspect only records associated with their own factory; the Host remains
  * the root account and can inspect both branches.
  */
-export function scopeArchivePayload<T extends ArchivePayload>(actor: RequestActor, payload: T): T {
-  if (actor.role === 'director') return payload
+export function scopeArchivePayload<T extends ArchivePayload>(actor: RequestActor, payload: T, requestedFactory?: string | null): T {
+  const factoryId: FactoryId = actor.role === 'director'
+    ? (isFactoryId(requestedFactory) ? requestedFactory : 'factory-1')
+    : actor.factoryId
+  const shouldScope = actor.role !== 'director' || Boolean(requestedFactory)
+  if (!shouldScope) return payload
 
   const records = payload.records || {}
   const profiles = Array.isArray(records.employeeProfiles) ? records.employeeProfiles : []
@@ -38,7 +43,7 @@ export function scopeArchivePayload<T extends ArchivePayload>(actor: RequestActo
     profiles
       .filter((record) => {
         const data = record.data && typeof record.data === 'object' ? record.data as Record<string, unknown> : {}
-        return String(data.factoryId || 'factory-1') === actor.factoryId
+        return String(data.factoryId || 'factory-1') === factoryId
       })
       .map((record) => record.id),
   )
@@ -48,7 +53,7 @@ export function scopeArchivePayload<T extends ArchivePayload>(actor: RequestActo
     collection === 'employeeProfiles'
       ? collectionRecords.filter((record) => {
           const data = record.data && typeof record.data === 'object' ? record.data as Record<string, unknown> : {}
-          return String(data.factoryId || 'factory-1') === actor.factoryId
+        return String(data.factoryId || 'factory-1') === factoryId
         })
       : collectionRecords.filter((record) => belongsToFactory(record, actor.factoryId, allowedEmployeeIds)),
   ])) as Record<string, ArchiveRecord[]>

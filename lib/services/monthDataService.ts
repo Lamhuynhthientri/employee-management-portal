@@ -1,6 +1,7 @@
 import { auth } from '@/lib/firebase'
 import type { Employee, Penalty, SalaryAdvance } from '@/lib/models/types'
 import { previousVietnamMonth } from '@/lib/archive/retention'
+import type { FactoryId } from '@/lib/models/factory'
 
 export type MonthDataSource = 'firestore' | 'drive' | 'merged'
 
@@ -34,10 +35,10 @@ function hydrateDates(record: Record<string, unknown>): Record<string, unknown> 
   return result
 }
 
-async function readMonth<T extends Record<string, unknown>>(resource: 'penalties' | 'salaryAdvances', month: string): Promise<MonthDataResult<T>> {
+async function readMonth<T extends Record<string, unknown>>(resource: 'penalties' | 'salaryAdvances', month: string, factoryId?: FactoryId): Promise<MonthDataResult<T>> {
   const user = auth.currentUser
   if (!user) throw new Error('Bạn cần đăng nhập để xem dữ liệu theo tháng.')
-  const key = `${user.uid}:${resource}:${month}`
+  const key = `${user.uid}:${resource}:${factoryId || 'all'}:${month}`
   const previousMonth = previousVietnamMonth(new Date()).key
   removeInactiveMonthCacheEntries(previousMonth)
   const cacheableMonth = month === previousMonth
@@ -45,7 +46,8 @@ async function readMonth<T extends Record<string, unknown>>(resource: 'penalties
   if (cached && cached.expiresAt > Date.now()) return cached.result as MonthDataResult<T>
   if (cached) cache.delete(key)
   const token = await user.getIdToken()
-  const response = await fetch(`/api/month-data?resource=${resource}&month=${encodeURIComponent(month)}`, { headers: { authorization: `Bearer ${token}` }, cache: 'no-store' })
+  const factoryQuery = factoryId ? `&factory=${encodeURIComponent(factoryId)}` : ''
+  const response = await fetch(`/api/month-data?resource=${resource}&month=${encodeURIComponent(month)}${factoryQuery}`, { headers: { authorization: `Bearer ${token}` }, cache: 'no-store' })
   const body = await response.json().catch(() => null) as { ok?: boolean; result?: MonthDataResult<T>; error?: string } | null
   if (!response.ok || !body?.ok || !body.result) throw new Error(body?.error || 'Chưa thể tải dữ liệu theo tháng.')
   const result: MonthDataResult<T> = {
@@ -67,10 +69,10 @@ async function readMonth<T extends Record<string, unknown>>(resource: 'penalties
   return result
 }
 
-export const readPenaltyMonth = (month: string) => readMonth<Penalty & Record<string, unknown>>('penalties', month)
-export const readSalaryAdvanceMonth = (month: string) => readMonth<SalaryAdvance & Record<string, unknown>>('salaryAdvances', month)
+export const readPenaltyMonth = (month: string, factoryId?: FactoryId) => readMonth<Penalty & Record<string, unknown>>('penalties', month, factoryId)
+export const readSalaryAdvanceMonth = (month: string, factoryId?: FactoryId) => readMonth<SalaryAdvance & Record<string, unknown>>('salaryAdvances', month, factoryId)
 
 export function invalidateMonthData(resource: 'penalties' | 'salaryAdvances', month: string) {
   const uid = auth.currentUser?.uid
-  if (uid) cache.delete(`${uid}:${resource}:${month}`)
+  if (uid) for (const key of cache.keys()) if (key.startsWith(`${uid}:${resource}:`) && key.endsWith(`:${month}`)) cache.delete(key)
 }

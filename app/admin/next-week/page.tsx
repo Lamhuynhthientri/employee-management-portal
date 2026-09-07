@@ -10,7 +10,8 @@ import { subscribeToAllEmployees } from '@/lib/services/employeeService'
 import { getPreviewSchedules } from '@/lib/services/previewWorkflow'
 import { adminCancelWorkSchedules, subscribeToAllSchedules } from '@/lib/services/scheduleService'
 import { auth } from '@/lib/firebase'
-import { employeeFactoryId } from '@/lib/models/factory'
+import { useManagementFactory } from '@/lib/hooks/useManagementFactory'
+import { FactorySwitcher } from '@/components/admin/factory-switcher'
 
 type Shift = WorkSchedule['shift']
 
@@ -89,6 +90,7 @@ function isDutySchedule(schedule: WorkSchedule) {
 export default function NextWeekStaffPage() {
   const { authUser, employee: currentEmployee, isPreviewMode } = useAuth()
   const role = useUserRole()
+  const { factoryId, setFactoryId } = useManagementFactory()
   const [employees, setEmployees] = useState<Employee[]>([])
   const [schedules, setSchedules] = useState<ScheduleRow[]>([])
   const [employeesReady, setEmployeesReady] = useState(false)
@@ -129,7 +131,7 @@ export default function NextWeekStaffPage() {
       return
     }
 
-    const factoryScope = role === 'director' ? undefined : employeeFactoryId(currentEmployee)
+    const factoryScope = factoryId
     const unsubscribeEmployees = subscribeToAllEmployees(
       (items) => {
         setEmployees(items)
@@ -163,7 +165,7 @@ export default function NextWeekStaffPage() {
       unsubscribeEmployees()
       unsubscribeSchedules()
     }
-  }, [authUser, currentEmployee, days, isPreviewMode, role])
+  }, [authUser, currentEmployee, days, factoryId, isPreviewMode, role])
   const activeEmployees = useMemo(() => employees.filter((employee) => employee.status === 'active'), [employees])
   const activeEmployeeIds = useMemo(() => new Set(activeEmployees.map((employee) => employee.uid)), [activeEmployees])
   const employeeNames = useMemo(
@@ -293,7 +295,7 @@ export default function NextWeekStaffPage() {
     try {
       const token = await auth.currentUser?.getIdToken()
       if (!token) throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.')
-      const response = await fetch('/api/exports/next-week-schedule', {
+      const response = await fetch(`/api/exports/next-week-schedule?factory=${encodeURIComponent(factoryId)}`, {
         headers: { authorization: `Bearer ${token}` },
       })
       if (!response.ok) {
@@ -304,7 +306,7 @@ export default function NextWeekStaffPage() {
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = url
-      anchor.download = `lich-nhan-su-tuan-nay-${new Date().toISOString().slice(0, 10)}.xlsx`
+      anchor.download = `lich-nhan-su-tuan-nay-${factoryId}-${new Date().toISOString().slice(0, 10)}.xlsx`
       anchor.click()
       URL.revokeObjectURL(url)
       setMessage('Đã tải lịch nhân sự tuần này về máy.')
@@ -325,7 +327,7 @@ export default function NextWeekStaffPage() {
     try {
       const token = await auth.currentUser?.getIdToken()
       if (!token) throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.')
-      const response = await fetch('/api/exports/next-week-duty', {
+      const response = await fetch(`/api/exports/next-week-duty?factory=${encodeURIComponent(factoryId)}`, {
         headers: { authorization: `Bearer ${token}` },
       })
       if (!response.ok) {
@@ -336,7 +338,7 @@ export default function NextWeekStaffPage() {
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = url
-      anchor.download = `lich-truc-tuan-nay-${new Date().toISOString().slice(0, 10)}.xlsx`
+      anchor.download = `lich-truc-tuan-nay-${factoryId}-${new Date().toISOString().slice(0, 10)}.xlsx`
       anchor.click()
       URL.revokeObjectURL(url)
       setMessage('Đã tải lịch trực tuần này về máy.')
@@ -390,6 +392,7 @@ export default function NextWeekStaffPage() {
         )}
       />
       <PageContainer maxWidth="2xl">
+        <FactorySwitcher factoryId={factoryId} onChange={setFactoryId} canSelect={role === 'director'} />
         <section className="mb-4 flex items-center gap-3 rounded-3xl bg-gradient-to-r from-indigo-600 to-violet-600 p-4 text-white shadow-lg shadow-indigo-600/20">
           <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/15">
             <CalendarRange className="h-6 w-6" />

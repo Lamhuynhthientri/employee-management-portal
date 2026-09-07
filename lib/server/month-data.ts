@@ -7,6 +7,8 @@ import { adminDb } from '@/lib/server/firebase-admin'
 import { Timestamp, type DocumentData, type DocumentSnapshot } from 'firebase-admin/firestore'
 import { currentVietnamMonth } from '@/lib/archive/retention'
 import { withMonthDataCache } from '@/lib/server/month-data-cache'
+import { resolveFactoryScope } from '@/lib/server/factory-scope'
+import type { FactoryId } from '@/lib/models/factory'
 
 export type MonthRecord = { id: string; path?: string; data: Record<string, unknown> }
 type ArchivePayload = { records?: Record<string, MonthRecord[]> }
@@ -94,14 +96,14 @@ async function loadMonthSourceData(month: string, resource: 'penalties' | 'salar
   }
 }
 
-export async function getAuthorizedMonthData(actor: RequestActor, month: string, resource: 'penalties' | 'salaryAdvances') {
+export async function getAuthorizedMonthData(actor: RequestActor, month: string, resource: 'penalties' | 'salaryAdvances', requestedFactory?: string | null) {
+  const factoryId: FactoryId = resolveFactoryScope(actor, requestedFactory)
   const sourceData = await withMonthDataCache(resource, month, () => loadMonthSourceData(month, resource))
   const profiles = sourceData.profiles
   const profileDataById = new Map(profiles.map((item) => [item.id, item.data]))
   const canReadEmployee = (employeeId: string) => {
     if (actor.role === 'employee') return employeeId === actor.uid
-    if (actor.role === 'director') return true
-    return employeeFactoryId(profileDataById.get(employeeId) as never) === actor.factoryId
+    return employeeFactoryId(profileDataById.get(employeeId) as never) === factoryId
   }
   const records = sourceData.records.filter((item) => canReadEmployee(String(item.data.employeeId || '')))
   const employeeIds = new Set(records.map((item) => String(item.data.employeeId || '')))

@@ -12,7 +12,8 @@ import { reopenSalaryAdvance, subscribeToAllSalaryAdvances, updateSalaryAdvanceS
 import { DEMO_EMPLOYEE } from '@/lib/config/demo'
 import { mockSalaryAdvances } from '@/lib/services/mockData'
 import { auth } from '@/lib/firebase'
-import { employeeFactoryId } from '@/lib/models/factory'
+import { useManagementFactory } from '@/lib/hooks/useManagementFactory'
+import { FactorySwitcher } from '@/components/admin/factory-switcher'
 import { MonthNavigator } from '@/components/ui/month-navigator'
 import { readSalaryAdvanceMonth } from '@/lib/services/monthDataService'
 import { currentVietnamMonth } from '@/lib/archive/retention'
@@ -75,6 +76,7 @@ function directorDate(value: string | null) {
 
 function DirectorSalaryAdvancesPanel({ isPreviewMode }: { isPreviewMode: boolean }) {
   const { authUser } = useAuth()
+  const { factoryId, setFactoryId } = useManagementFactory()
   const [items, setItems] = useState<DirectorSalaryAdvance[]>([])
   const [ready, setReady] = useState(false)
   const [message, setMessage] = useState('')
@@ -139,7 +141,7 @@ function DirectorSalaryAdvancesPanel({ isPreviewMode }: { isPreviewMode: boolean
     setReady(false)
     void (async () => {
       try {
-        const result = await readSalaryAdvanceMonth(month)
+        const result = await readSalaryAdvanceMonth(month, factoryId)
         source = result.source
         sourceRecords = result.records
         employeeById = new Map(result.employees.map((employee) => [employee.uid || (employee as Employee & { id?: string }).id || '', employee]))
@@ -153,7 +155,7 @@ function DirectorSalaryAdvancesPanel({ isPreviewMode }: { isPreviewMode: boolean
     return () => {
       active = false
     }
-  }, [authUser, isPreviewMode, month])
+  }, [authUser, factoryId, isPreviewMode, month])
 
   const copyAccountNumber = async (item: DirectorSalaryAdvance) => {
     if (!item.bankAccountNumber) return
@@ -187,13 +189,13 @@ function DirectorSalaryAdvancesPanel({ isPreviewMode }: { isPreviewMode: boolean
     try {
       const token = await auth.currentUser?.getIdToken()
       if (!token) throw new Error('Bạn cần đăng nhập lại.')
-      const response = await fetch(`/api/exports/salary-advances?month=${encodeURIComponent(month)}`, { headers: { authorization: `Bearer ${token}` } })
+      const response = await fetch(`/api/exports/salary-advances?month=${encodeURIComponent(month)}&factory=${encodeURIComponent(factoryId)}`, { headers: { authorization: `Bearer ${token}` } })
       if (!response.ok) throw new Error('Chưa thể xuất file Excel ứng lương.')
       const blob = await response.blob()
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = url
-      anchor.download = `danh-sach-ung-luong-da-duyet-${month}.xlsx`
+      anchor.download = `danh-sach-ung-luong-da-duyet-${factoryId}-${month}.xlsx`
       anchor.click()
       URL.revokeObjectURL(url)
     } catch (error) {
@@ -209,6 +211,7 @@ function DirectorSalaryAdvancesPanel({ isPreviewMode }: { isPreviewMode: boolean
     <main className="min-h-screen bg-[#f3f7fb] pb-28 dark:bg-slate-950 md:pb-32">
       <Header title="Danh sách ứng lương" subtitle="Danh sách đã duyệt · sẵn sàng chuyển khoản" />
       <PageContainer maxWidth="2xl">
+        <FactorySwitcher factoryId={factoryId} onChange={setFactoryId} />
         <MonthNavigator value={month} onChange={setMonth} loading={!ready} />
         <section className="mb-5 overflow-hidden rounded-3xl bg-gradient-to-br from-sky-600 via-blue-600 to-indigo-700 p-4 text-white shadow-lg shadow-blue-900/15 sm:p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -300,6 +303,7 @@ function DirectorSalaryAdvancesPanel({ isPreviewMode }: { isPreviewMode: boolean
 export default function AdminSalaryAdvancesPage() {
   const { authUser, employee: currentEmployee, isPreviewMode } = useAuth()
   const role = useUserRole()
+  const { factoryId, setFactoryId } = useManagementFactory()
   const [employees, setEmployees] = useState<Employee[]>([])
   const [requests, setRequests] = useState<SalaryAdvance[]>([])
   const [liveRequests, setLiveRequests] = useState<SalaryAdvance[]>([])
@@ -324,7 +328,7 @@ export default function AdminSalaryAdvancesPage() {
     try {
       const token = await auth.currentUser?.getIdToken()
       if (!token) throw new Error('Bạn cần đăng nhập lại.')
-      const response = await fetch(`/api/exports/salary-advances?month=${encodeURIComponent(month)}`, {
+      const response = await fetch(`/api/exports/salary-advances?month=${encodeURIComponent(month)}&factory=${encodeURIComponent(factoryId)}`, {
         headers: { authorization: `Bearer ${token}` },
       })
       if (!response.ok) throw new Error('Chưa thể xuất file Excel ứng lương.')
@@ -332,7 +336,7 @@ export default function AdminSalaryAdvancesPage() {
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = url
-      anchor.download = `lich-su-ung-luong-${new Date().toISOString().slice(0, 10)}.xlsx`
+      anchor.download = `lich-su-ung-luong-${factoryId}-${new Date().toISOString().slice(0, 10)}.xlsx`
       anchor.click()
       URL.revokeObjectURL(url)
     } catch (error) {
@@ -358,17 +362,17 @@ export default function AdminSalaryAdvancesPage() {
     const unsubscribeEmployees = subscribeToAllEmployees((items) => {
       setEmployees(items)
       setReady((current) => ({ ...current, employees: true }))
-    }, fail, employeeFactoryId(currentEmployee))
+    }, fail, factoryId)
     const currentMonthWindow = currentVietnamMonth(new Date())
     const unsubscribeRequests = subscribeToAllSalaryAdvances((items) => {
       setLiveRequests(items)
       setReady((current) => ({ ...current, requests: true }))
-    }, fail, { startDate: currentMonthWindow.start, endDate: currentMonthWindow.end }, employeeFactoryId(currentEmployee))
+    }, fail, { startDate: currentMonthWindow.start, endDate: currentMonthWindow.end }, factoryId)
     return () => {
       unsubscribeEmployees()
       unsubscribeRequests()
     }
-  }, [authUser, currentEmployee, isPreviewMode, role])
+  }, [authUser, currentEmployee, factoryId, isPreviewMode, role])
 
   useEffect(() => {
     if (!authUser || isPreviewMode || role === 'director') return
@@ -380,7 +384,7 @@ export default function AdminSalaryAdvancesPage() {
     let active = true
     setRequests([])
     setMonthLoading(true)
-    void readSalaryAdvanceMonth(month)
+    void readSalaryAdvanceMonth(month, factoryId)
       .then((result) => {
         if (!active) return
         setRequests(result.records)
@@ -393,7 +397,7 @@ export default function AdminSalaryAdvancesPage() {
       .catch((error) => { if (active) setMessage(error instanceof Error ? error.message : 'Chưa thể tải lịch sử ứng lương.') })
       .finally(() => { if (active) setMonthLoading(false) })
     return () => { active = false }
-  }, [authUser, isPreviewMode, liveRequests, month, role])
+  }, [authUser, factoryId, isPreviewMode, liveRequests, month, role])
 
   const activeEmployeeIds = useMemo(
     () => new Set(employees.filter((employee) => month === currentVietnamMonth(new Date()).key ? employee.status === 'active' : true).map((employee) => employee.uid)),
@@ -471,6 +475,7 @@ export default function AdminSalaryAdvancesPage() {
     <main className="min-h-screen bg-slate-50/70 pb-28 dark:bg-slate-950 md:pb-32">
       <Header title="Quản lý ứng lương" subtitle="Duyệt nhanh, theo dõi rõ và gửi đúng danh sách đã duyệt" />
       <PageContainer maxWidth="2xl">
+        <FactorySwitcher factoryId={factoryId} onChange={setFactoryId} canSelect={false} />
         <MonthNavigator value={month} onChange={setMonth} loading={monthLoading} />
         <div className="mb-4 rounded-2xl border border-sky-500/20 bg-gradient-to-r from-sky-600 to-blue-700 p-3 text-white shadow-md shadow-sky-950/10">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

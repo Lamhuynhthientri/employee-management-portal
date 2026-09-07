@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     if (!/^\d{4}-\d{2}$/.test(month)) throw new ApiError(400, 'Tháng cần có định dạng YYYY-MM.')
     if (resource !== 'penalties' && resource !== 'salaryAdvances') throw new ApiError(400, 'Loại dữ liệu không hợp lệ.')
 
-    return NextResponse.json({ ok: true, result: await getAuthorizedMonthData(actor, month, resource) })
+    return NextResponse.json({ ok: true, result: await getAuthorizedMonthData(actor, month, resource, params.get('factory')) })
   } catch (error) {
     const status = error instanceof ApiError ? error.status : 500
     if (!(error instanceof ApiError)) console.error('Month data failed:', error)

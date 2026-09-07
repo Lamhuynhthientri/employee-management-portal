@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
-import { authenticateRequest } from '@/lib/server/api-auth'
+import { ApiError, authenticateRequest } from '@/lib/server/api-auth'
 import { getAuthorizedMonthData } from '@/lib/server/month-data'
 import {
   configureReportSheet,
@@ -29,9 +29,11 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Bạn không có quyền xuất lịch sử ứng lương.' }, { status: 403 })
     }
 
-    const month = new URL(request.url).searchParams.get('month') || new Date().toISOString().slice(0, 7)
+    const params = new URL(request.url).searchParams
+    const month = params.get('month') || new Date().toISOString().slice(0, 7)
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return NextResponse.json({ error: 'Tháng xuất không hợp lệ.' }, { status: 400 })
-    const monthData = await getAuthorizedMonthData(actor, month, 'salaryAdvances')
+    const factory = params.get('factory')
+    const monthData = await getAuthorizedMonthData(actor, month, 'salaryAdvances', factory)
     const employeeMap = new Map(monthData.employees.map((employee) => [String(employee.uid || employee.id), employee as Record<string, unknown>]))
     const approvedAdvances = monthData.records.filter((advance) => {
       const employee = employeeMap.get(String(advance.employeeId))
@@ -89,11 +91,12 @@ export async function GET(request: Request) {
     return new Response(buffer, {
       headers: {
         'content-type': REPORT_XLSX_CONTENT_TYPE,
-        'content-disposition': `attachment; filename="danh-sach-ung-luong-da-duyet-${month}.xlsx"`,
+        'content-disposition': `attachment; filename="danh-sach-ung-luong-da-duyet-${factory ? `${factory}-` : ''}${month}.xlsx"`,
         'cache-control': 'no-store',
       },
     })
   } catch (error) {
+    if (error instanceof ApiError) return NextResponse.json({ error: error.message }, { status: error.status })
     console.error('Salary history Excel export failed:', error)
     return NextResponse.json({ error: 'Chưa thể xuất file Excel.' }, { status: 500 })
   }

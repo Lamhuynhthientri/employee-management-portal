@@ -31,12 +31,13 @@ import { useAuth, useUserRole } from '@/lib/hooks/useAuth'
 import { getAllEmployees } from '@/lib/services/employeeService'
 import { getManagementSchedulesByDateRange, getSchedulesByDateRange, hasEmployeeSchedules } from '@/lib/services/scheduleService'
 import { getPreviewSchedules } from '@/lib/services/previewWorkflow'
-import { getUserFeatureSettings, getWeeklyScheduleTarget } from '@/lib/services/managementSettingsService'
+import { getWeeklyScheduleTarget } from '@/lib/services/managementSettingsService'
 import { AppLoadingScreen } from '@/components/ui/app-loading-screen'
 import { isManagementScheduleRole, registrationTargetsNextWeek } from '@/lib/schedule/registration-policy'
 import { useNotificationFeed } from '@/components/notifications/notification-feed-provider'
 import { profileImageUrl } from '@/lib/utils/profileImage'
-import { defaultUserFeatureSettings, type UserFeatureKey, type UserFeatureSettings } from '@/lib/models/userFeatureSettings'
+import { useManagementFactory } from '@/lib/hooks/useManagementFactory'
+import { FactorySwitcher } from '@/components/admin/factory-switcher'
 
 const staffFeatures = [
   { key: 'schedule', title: 'Đăng ký lịch làm', note: 'Chọn ca cho tuần tiếp theo', href: '/schedule', icon: CalendarDays, tone: 'bg-indigo-600' },
@@ -52,44 +53,12 @@ export default function Page() {
   const router = useRouter()
   const { authUser, employee, isLoading, isPreviewMode, logout } = useAuth()
   const role = useUserRole()
+  const { factoryId, setFactoryId } = useManagementFactory()
   const { managementPendingItems, managementPendingReady } = useNotificationFeed()
   const { theme, setTheme } = useTheme()
   const [adminStats, setAdminStats] = useState({ confirmed: 0, total: 0, pending: 0, actionable: 0, otherPending: 0 })
   const [schedulePrompt, setSchedulePrompt] = useState<{ visible: boolean; isNew: boolean; href: string }>({ visible: false, isNew: false, href: '/schedule' })
   const [employeeModeOpen, setEmployeeModeOpen] = useState(false)
-  const [enabledUserFeatures, setEnabledUserFeatures] = useState<UserFeatureSettings | null>(null)
-
-  useEffect(() => {
-    if (isPreviewMode) {
-      setEnabledUserFeatures(authUser ? { ...defaultUserFeatureSettings } : null)
-      return
-    }
-
-    // Firebase auth resolves before the employee profile subscription. A new
-    // account can therefore reach this page briefly without a profile that
-    // the workflow API can authenticate yet. Do not treat that race as “all
-    // features enabled”; wait for the profile and then fetch the authoritative
-    // admin setting.
-    if (!authUser || !employee || employee.uid !== authUser.uid) {
-      setEnabledUserFeatures(null)
-      return
-    }
-
-    let active = true
-    setEnabledUserFeatures(null)
-    void getUserFeatureSettings({ force: true })
-      .then((settings) => {
-        if (active) setEnabledUserFeatures(settings)
-      })
-      .catch((error) => {
-        // Showing disabled features after a failed read is safer than showing
-        // actions that the admin explicitly turned off. The next profile/auth
-        // refresh can retry the request.
-        console.error('Error fetching user feature settings:', error)
-        if (active) setEnabledUserFeatures(null)
-      })
-    return () => { active = false }
-  }, [authUser?.uid, employee?.uid, employee?.status, isPreviewMode])
 
   useEffect(() => {
     if (!isLoading && !authUser) router.push('/auth/login')
@@ -135,8 +104,8 @@ export default function Page() {
         }
         const weekKey = `${nextMonday.getFullYear()}-${String(nextMonday.getMonth() + 1).padStart(2, '0')}-${String(nextMonday.getDate()).padStart(2, '0')}`
         const [employees, schedules, target] = await Promise.all([
-          getAllEmployees(),
-          getManagementSchedulesByDateRange(nextMonday, nextSunday),
+          getAllEmployees(factoryId),
+          getManagementSchedulesByDateRange(nextMonday, nextSunday, factoryId),
           getWeeklyScheduleTarget(weekKey),
         ])
         const fixedForNextWeek = employees.filter((employee) => {
@@ -160,7 +129,7 @@ export default function Page() {
       }
     }
     loadAdminStats()
-  }, [authUser, isPreviewMode, role])
+  }, [authUser, factoryId, isPreviewMode, role])
 
   useEffect(() => {
     if (!authUser || !managementPendingReady || role === 'director' || isPreviewMode) return
@@ -272,18 +241,14 @@ export default function Page() {
   // Management accounts can use the same self-service utilities as staff.
   // Keep schedule registration here as the first card so managers do not
   // need to leave management mode to submit their own availability.
-  const featureSettings = authUser
-    ? (isPreviewMode ? defaultUserFeatureSettings : enabledUserFeatures)
-    : null
-  const featuresReady = featureSettings !== null
-  const isFeatureEnabled = (key: UserFeatureKey) => featureSettings?.[key] === true
-  const visibleStaffFeatures = featuresReady
-    ? staffFeatures.filter(({ key }) => isFeatureEnabled(key as UserFeatureKey))
-    : []
+  // The staff utility set is intentionally fixed. It no longer waits for a
+  // remote visibility setting whenever the user returns to the home page.
+  const visibleStaffFeatures = staffFeatures
   const collapsibleStaffFeatures = visibleStaffFeatures
 
   return (
     <main className="min-h-screen w-full overflow-x-clip pb-24 md:pb-10">
+      {isDirector && <div className="mx-auto w-full max-w-6xl px-4 pt-3 md:px-5 lg:px-7"><FactorySwitcher factoryId={factoryId} onChange={setFactoryId} /></div>}
       <section className="home-hero box-border w-full max-w-full overflow-hidden rounded-b-[1.75rem] border-b border-pink-200/70 bg-pink-50 px-4 pb-5 pt-[max(1rem,env(safe-area-inset-top))] text-slate-950 shadow-sm md:mx-auto md:mt-5 md:w-[calc(100%-2.5rem)] md:max-w-6xl md:rounded-[2rem] md:border md:px-5 md:py-5 md:shadow-lg md:shadow-slate-950/5 lg:mt-7 lg:px-7 lg:py-7">
         <div className="mx-auto max-w-2xl md:grid md:max-w-none md:grid-cols-[0.82fr_1.18fr] md:items-stretch md:gap-4 lg:gap-5">
           <div className="flex items-center justify-between md:rounded-[1.6rem] md:border md:border-white/80 md:bg-white/65 md:p-4 md:shadow-sm md:backdrop-blur-sm lg:p-5">
@@ -345,7 +310,7 @@ export default function Page() {
       </section>
 
       <div className="mx-auto max-w-2xl px-3 py-5 sm:px-6 md:max-w-4xl md:py-7 lg:w-[calc(100%-2.5rem)] lg:max-w-6xl lg:px-0 lg:pb-12 lg:pt-7">
-        {!isDirector && schedulePrompt.visible && featureSettings?.schedule && (
+        {!isDirector && schedulePrompt.visible && (
           <Link
             href={schedulePrompt.href}
             className="mb-5 flex min-w-0 items-center gap-3 overflow-hidden rounded-2xl border border-indigo-200 bg-indigo-50 p-3 text-indigo-950 shadow-sm transition active:scale-[0.99] dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100"
@@ -435,21 +400,15 @@ export default function Page() {
               <h2 className="shrink-0 text-lg font-black tracking-tight">Tiện ích của bạn</h2>
               <span className="h-px flex-1 bg-gradient-to-r from-fuchsia-300 via-indigo-200 to-transparent" />
             </div>
-            {!featuresReady ? (
-              <div aria-label="Đang tải tiện ích" className="grid grid-cols-2 gap-3 md:grid-cols-2 md:gap-4 lg:grid-cols-4">
-                {Array.from({ length: 7 }).map((_, index) => <div key={index} className={`mobile-card min-h-[148px] animate-pulse bg-slate-100/80 p-4 dark:bg-slate-800/60 ${index === 0 ? 'col-span-2 min-h-[118px] md:min-h-[132px] lg:col-span-2' : ''}`} />)}
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-2 md:gap-4 lg:grid-cols-4">
-                {visibleStaffFeatures.map(({ key, title, note, href, icon: Icon, tone }) => (
-                  <Link key={key} href={href} className={`mobile-card group flex min-h-[148px] flex-col p-4 transition duration-200 hover:-translate-y-1 hover:border-indigo-200 hover:shadow-lg hover:shadow-indigo-950/5 active:scale-[0.98] md:min-h-[132px] md:p-5 lg:min-h-[136px] ${key === 'schedule' ? 'col-span-2 min-h-[118px] md:min-h-[132px] md:flex-row md:items-center md:gap-5 md:border-indigo-200/80 md:bg-gradient-to-r md:from-indigo-50 md:via-white md:to-fuchsia-50 dark:md:from-indigo-500/15 dark:md:via-slate-900 dark:md:to-fuchsia-500/10 lg:col-span-2 lg:min-h-[136px]' : ''}`}>
-                    <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-white shadow-sm ${tone} ${key === 'schedule' ? 'md:h-14 md:w-14' : ''}`}><Icon className="h-5 w-5" /></div>
-                    <div className={`mt-auto pt-4 ${key === 'schedule' ? 'md:mt-0 md:pt-0' : ''}`}><h3 className="font-extrabold leading-tight lg:text-[15px]">{title}</h3><p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{note}</p></div>
-                    <ChevronRight className="ml-auto hidden h-5 w-5 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-indigo-500 md:block" />
-                  </Link>
-                ))}
-              </div>
-            )}
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-2 md:gap-4 lg:grid-cols-4">
+              {visibleStaffFeatures.map(({ key, title, note, href, icon: Icon, tone }) => (
+                <Link key={key} href={href} className={`mobile-card group flex min-h-[148px] flex-col p-4 transition duration-200 hover:-translate-y-1 hover:border-indigo-200 hover:shadow-lg hover:shadow-indigo-950/5 active:scale-[0.98] md:min-h-[132px] md:p-5 lg:min-h-[136px] ${key === 'schedule' ? 'col-span-2 min-h-[118px] md:min-h-[132px] md:flex-row md:items-center md:gap-5 md:border-indigo-200/80 md:bg-gradient-to-r md:from-indigo-50 md:via-white md:to-fuchsia-50 dark:md:from-indigo-500/15 dark:md:via-slate-900 dark:md:to-fuchsia-500/10 lg:col-span-2 lg:min-h-[136px]' : ''}`}>
+                  <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-white shadow-sm ${tone} ${key === 'schedule' ? 'md:h-14 md:w-14' : ''}`}><Icon className="h-5 w-5" /></div>
+                  <div className={`mt-auto pt-4 ${key === 'schedule' ? 'md:mt-0 md:pt-0' : ''}`}><h3 className="font-extrabold leading-tight lg:text-[15px]">{title}</h3><p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{note}</p></div>
+                  <ChevronRight className="ml-auto hidden h-5 w-5 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-indigo-500 md:block" />
+                </Link>
+              ))}
+            </div>
           </section>
         ) : null}
       </div>

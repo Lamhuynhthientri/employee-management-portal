@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
-import { authenticateRequest } from '@/lib/server/api-auth'
+import { ApiError, authenticateRequest } from '@/lib/server/api-auth'
 import { getAuthorizedMonthData } from '@/lib/server/month-data'
 import {
   configureReportSheet,
@@ -62,15 +62,17 @@ type PenaltyRow = {
 export async function GET(request: Request) {
   try {
     const actor = await authenticateRequest(request)
-    if (!['admin', 'manager'].includes(actor.role)) {
+    if (!['admin', 'manager', 'director'].includes(actor.role)) {
       return NextResponse.json({ error: 'Bạn không có quyền xuất bảng phạt.' }, { status: 403 })
     }
-    const month = new URL(request.url).searchParams.get('month') || ''
+    const params = new URL(request.url).searchParams
+    const month = params.get('month') || ''
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
       return NextResponse.json({ error: 'Tháng xuất không hợp lệ.' }, { status: 400 })
     }
 
-    const monthData = await getAuthorizedMonthData(actor, month, 'penalties')
+    const factory = params.get('factory')
+    const monthData = await getAuthorizedMonthData(actor, month, 'penalties', factory)
     const employeeMap = new Map(monthData.employees.map((employee) => [String(employee.uid || employee.id), employee as Record<string, unknown>]))
     const penaltyRows: PenaltyRow[] = []
 
@@ -134,11 +136,12 @@ export async function GET(request: Request) {
     return new Response(buffer, {
       headers: {
         'content-type': REPORT_XLSX_CONTENT_TYPE,
-        'content-disposition': `attachment; filename="bang-phat-${month}.xlsx"`,
+        'content-disposition': `attachment; filename="bang-phat-${factory || actor.factoryId}-${month}.xlsx"`,
         'cache-control': 'no-store',
       },
     })
   } catch (error) {
+    if (error instanceof ApiError) return NextResponse.json({ error: error.message }, { status: error.status })
     console.error('Penalty Excel export failed:', error)
     return NextResponse.json({ error: 'Chưa thể xuất bảng phạt Excel.' }, { status: 500 })
   }

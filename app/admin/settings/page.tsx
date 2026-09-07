@@ -1,22 +1,19 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Activity, AlertTriangle, CalendarClock, Check, Clock3, Database, HardDrive, Loader2, MailCheck, Power, RefreshCw, ShieldCheck, UserPlus } from 'lucide-react'
+import { Activity, AlertTriangle, CalendarClock, Clock3, Database, HardDrive, Loader2, MailCheck, RefreshCw, ShieldCheck, UserPlus } from 'lucide-react'
 import { Header } from '@/components/layout/header'
 import { PageContainer } from '@/components/layout/page-container'
 import { useAuth, useUserRole } from '@/lib/hooks/useAuth'
 import {
   getAuditReceiptSettings,
   getAccountRegistrationWindow,
-  getUserFeatureSettings,
   getSalaryAdvancePolicy,
   updateAuditReceiptSettings,
   updateAccountRegistrationWindow,
-  updateUserFeatureSetting,
   updateSalaryAdvancePolicy,
   type SalaryAdvancePolicy,
 } from '@/lib/services/managementSettingsService'
-import { defaultUserFeatureSettings, type UserFeatureKey, type UserFeatureSettings } from '@/lib/models/userFeatureSettings'
 import { getOperationalHealth, runOperationalHealthNow, type OperationalHealthSnapshot, type OperationalSeverity } from '@/lib/services/operationalHealthService'
 
 type ReceiptSettings = {
@@ -25,16 +22,6 @@ type ReceiptSettings = {
   emailEnvironmentEnabled: boolean
   emailConfigured: boolean
 }
-
-const userFeatureOptions: Array<{ key: UserFeatureKey; title: string; description: string }> = [
-  { key: 'schedule', title: 'Đăng ký lịch làm', description: 'Chọn ca cho tuần tiếp theo' },
-  { key: 'lateArrival', title: 'Xin đi trễ', description: 'Gửi yêu cầu đi trễ theo ca đã đăng ký' },
-  { key: 'leave', title: 'Xin nghỉ', description: 'Chọn ca đã duyệt và lý do nghỉ' },
-  { key: 'salaryAdvance', title: 'Ứng lương / yêu cầu', description: 'Ứng lương hoặc gửi đề nghị khác' },
-  { key: 'penalties', title: 'Khoản phạt', description: 'Xem lịch sử và các khoản phát sinh' },
-  { key: 'shiftChanges', title: 'Đổi / thêm ca', description: 'Đổi ca cũ hoặc đăng ký làm thêm' },
-  { key: 'companyRules', title: 'Điều khoản công ty', description: 'Quy định và hướng dẫn chung' },
-]
 
 const healthTone: Record<OperationalSeverity, { label: string; box: string; dot: string }> = {
   healthy: { label: 'Bình thường', box: 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100', dot: 'bg-emerald-500' },
@@ -64,8 +51,6 @@ export default function AdminSettingsPage() {
   const [message, setMessage] = useState('')
   const [registration, setRegistration] = useState<{ isOpen: boolean; closesAt: string | null }>({ isOpen: false, closesAt: null })
   const [registrationSaving, setRegistrationSaving] = useState(false)
-  const [userFeatures, setUserFeatures] = useState<UserFeatureSettings>({ ...defaultUserFeatureSettings })
-  const [userFeatureSaving, setUserFeatureSaving] = useState<UserFeatureKey | null>(null)
   const [salaryPolicy, setSalaryPolicy] = useState<SalaryAdvancePolicy>({ restrictionEnabled: false, canSubmit: true, vietnamDay: 1, allowedDays: [24, 25] })
   const [salaryPolicySaving, setSalaryPolicySaving] = useState(false)
   const [health, setHealth] = useState<OperationalHealthSnapshot | null>(null)
@@ -77,8 +62,8 @@ export default function AdminSettingsPage() {
       setLoading(false)
       return
     }
-      void Promise.all([getAuditReceiptSettings(), getAccountRegistrationWindow(), getUserFeatureSettings({ force: true }), getSalaryAdvancePolicy()])
-      .then(([receipt, accountWindow, features, nextSalaryPolicy]) => { setSettings(receipt); setRegistration(accountWindow); setUserFeatures(features); setSalaryPolicy(nextSalaryPolicy) })
+      void Promise.all([getAuditReceiptSettings(), getAccountRegistrationWindow(), getSalaryAdvancePolicy()])
+      .then(([receipt, accountWindow, nextSalaryPolicy]) => { setSettings(receipt); setRegistration(accountWindow); setSalaryPolicy(nextSalaryPolicy) })
       .catch(() => setMessage('Chưa tải được đầy đủ cài đặt quản lý.'))
       .finally(() => setLoading(false))
     void getOperationalHealth().then(setHealth).catch(() => setHealth(null))
@@ -131,26 +116,6 @@ export default function AdminSettingsPage() {
       setMessage(error instanceof Error ? error.message : 'Chưa thể cập nhật cổng tạo tài khoản.')
     } finally {
       setRegistrationSaving(false)
-    }
-  }
-
-  const toggleUserFeature = async (key: UserFeatureKey) => {
-    const enabled = !userFeatures[key]
-    const previous = userFeatures
-    setUserFeatureSaving(key)
-    setMessage('')
-    setUserFeatures((current) => ({ ...current, [key]: enabled }))
-    try {
-      const next = isPreviewMode
-        ? { ...userFeatures, [key]: enabled }
-        : await updateUserFeatureSetting(key, enabled)
-      setUserFeatures(next)
-      setMessage(enabled ? 'Đã bật lại tính năng cho user.' : 'Đã tắt tính năng cho user.')
-    } catch (error) {
-      setUserFeatures(previous)
-      setMessage(error instanceof Error ? error.message : 'Chưa thể lưu trạng thái tính năng.')
-    } finally {
-      setUserFeatureSaving(null)
     }
   }
 
@@ -288,47 +253,6 @@ export default function AdminSettingsPage() {
               </button>
             </div>
             <p className="mt-3 rounded-2xl bg-sky-50 px-3 py-2.5 text-xs font-semibold leading-5 text-sky-800 dark:bg-sky-500/10 dark:text-sky-200">Công tắc chỉ áp dụng cho nhân viên gửi mới hoặc gửi lại; admin vẫn xử lý yêu cầu bình thường.</p>
-          </section>
-        )}
-        {role === 'admin' && (
-          <section className="mobile-card mt-4 overflow-hidden p-4">
-            <div className="flex items-start gap-3">
-              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300">
-                <Power className="h-5 w-5" />
-              </div>
-              <div>
-                <h2 className="font-extrabold">Tắt tính năng của user</h2>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">Ẩn từng ô tiện ích trên trang user. Khi bật lại, ô sẽ trở về đúng vị trí cũ; khung đăng ký lịch vẫn giữ dạng lớn.</p>
-              </div>
-            </div>
-            <div className="mt-4 divide-y divide-slate-100 rounded-2xl border border-slate-100 dark:divide-slate-800 dark:border-slate-800">
-              {userFeatureOptions.map(({ key, title, description }) => {
-                const enabled = userFeatures[key]
-                const saving = userFeatureSaving === key
-                return (
-                  <div key={key} className="flex items-center gap-3 px-3 py-3">
-                    <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${enabled ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' : 'bg-slate-100 text-slate-400 dark:bg-slate-800'}`}>
-                      {enabled ? <Check className="h-4 w-4" /> : <Power className="h-4 w-4" />}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-bold">{title}</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-                    </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={enabled}
-                      aria-label={`${enabled ? 'Tắt' : 'Bật'} ${title}`}
-                      disabled={loading || saving}
-                      onClick={() => void toggleUserFeature(key)}
-                      className={`relative h-7 w-12 shrink-0 rounded-full p-1 transition-colors disabled:opacity-50 ${enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700'}`}
-                    >
-                      <span className={`block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${enabled ? 'translate-x-5' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
           </section>
         )}
         <section className="mt-4 flex gap-3 rounded-3xl border border-indigo-100 bg-indigo-50 p-4 text-indigo-900">
