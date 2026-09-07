@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { CalendarCheck, Check, UsersRound } from 'lucide-react'
-import { useAuth, useUserRole } from '@/lib/hooks/useAuth'
+import { useAuth } from '@/lib/hooks/useAuth'
 import type { Employee, WorkSchedule } from '@/lib/models/types'
 import { getPreviewSchedules } from '@/lib/services/previewWorkflow'
 import { subscribeToAllSchedules } from '@/lib/services/scheduleService'
-import { employeeFactoryId } from '@/lib/models/factory'
+import { type FactoryId } from '@/lib/models/factory'
 import {
   getWeeklyScheduleTarget,
   updateWeeklyScheduleTarget,
@@ -40,9 +40,8 @@ function scheduleWeekKey(value: WorkSchedule['date']) {
   return localDateKey(date)
 }
 
-export function ManagementOverview({ employees }: { employees: Employee[] }) {
-  const { authUser, employee: currentEmployee, isPreviewMode } = useAuth()
-  const role = useUserRole()
+export function ManagementOverview({ employees, factoryId }: { employees: Employee[]; factoryId: FactoryId }) {
+  const { authUser, isPreviewMode } = useAuth()
   const [schedules, setSchedules] = useState<WorkSchedule[]>([])
   const [expectedEmployees, setExpectedEmployees] = useState(0)
   const [saving, setSaving] = useState(false)
@@ -63,7 +62,7 @@ export function ManagementOverview({ employees }: { employees: Employee[] }) {
     const unsubscribe = subscribeToAllSchedules(
       setSchedules,
       undefined,
-      role === 'director' ? undefined : employeeFactoryId(currentEmployee),
+      factoryId,
       (() => {
         const startDate = nextMondayDate()
         const endDate = new Date(startDate)
@@ -72,11 +71,11 @@ export function ManagementOverview({ employees }: { employees: Employee[] }) {
         return { startDate, endDate }
       })()
     )
-    void getWeeklyScheduleTarget(nextMondayKey())
+    void getWeeklyScheduleTarget(nextMondayKey(), factoryId)
       .then((result) => setExpectedEmployees(result.expectedEmployees))
       .catch(() => setMessage('Chưa tải được mục tiêu gửi lịch tuần này.'))
     return unsubscribe
-  }, [authUser, currentEmployee, isPreviewMode, role])
+  }, [authUser, factoryId, isPreviewMode])
 
   const activeEmployees = useMemo(() => employees.filter((item) => item.status === 'active'), [employees])
   const activeEmployeeIds = useMemo(() => new Set(activeEmployees.map((item) => item.uid)), [activeEmployees])
@@ -101,7 +100,7 @@ export function ManagementOverview({ employees }: { employees: Employee[] }) {
     setSaving(true)
     try {
       if (!isPreviewMode) {
-        const result = await updateWeeklyScheduleTarget(nextMondayKey(), value)
+        const result = await updateWeeklyScheduleTarget(nextMondayKey(), value, factoryId)
         setExpectedEmployees(result.expectedEmployees)
       }
       setMessage(`Đã lưu mục tiêu ${value} nhân viên.`)

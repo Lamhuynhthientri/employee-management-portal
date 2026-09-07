@@ -106,7 +106,7 @@ export default function Page() {
         const [employees, schedules, target] = await Promise.all([
           getAllEmployees(factoryId),
           getManagementSchedulesByDateRange(nextMonday, nextSunday, factoryId),
-          getWeeklyScheduleTarget(weekKey),
+          getWeeklyScheduleTarget(weekKey, factoryId),
         ])
         const fixedForNextWeek = employees.filter((employee) => {
           const managementSchedule = isManagementScheduleRole(employee.role)

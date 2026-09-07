@@ -1,6 +1,7 @@
 import { callWorkflowApi } from '@/lib/services/workflowApi'
 import type { UserFeatureKey, UserFeatureSettings } from '@/lib/models/userFeatureSettings'
 import { auth } from '@/lib/firebase'
+import type { FactoryId } from '@/lib/models/factory'
 
 export interface ManagementContact {
   uid: string
@@ -66,15 +67,16 @@ export interface WeeklyScheduleTarget {
   expectedEmployees: number
 }
 
-export function getWeeklyScheduleTarget(weekStart: string): Promise<WeeklyScheduleTarget> {
-  return callWorkflowApi('getWeeklyScheduleTarget', { weekStart })
+export function getWeeklyScheduleTarget(weekStart: string, factoryId?: FactoryId): Promise<WeeklyScheduleTarget> {
+  return callWorkflowApi('getWeeklyScheduleTarget', { weekStart, factoryId })
 }
 
 export function updateWeeklyScheduleTarget(
   weekStart: string,
   expectedEmployees: number,
+  factoryId?: FactoryId,
 ): Promise<WeeklyScheduleTarget> {
-  return callWorkflowApi('updateWeeklyScheduleTarget', { weekStart, expectedEmployees })
+  return callWorkflowApi('updateWeeklyScheduleTarget', { weekStart, expectedEmployees, factoryId })
 }
 
 /** Returns the last known safe contact projection, even when it is older than the refresh TTL. */

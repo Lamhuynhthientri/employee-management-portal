@@ -98,10 +98,13 @@ export async function getWeeklyScheduleTarget(actor: RequestActor, raw: unknown)
   requireManager(actor)
   const body = objectBody(raw)
   const weekStart = weekKey(body.weekStart)
-  const snapshot = await adminDb.collection('weeklyScheduleTargets').doc(weekStart).get()
+  const factoryId = actor.role === 'director' && isFactoryId(body.factoryId) ? body.factoryId : null
+  const scopedRef = factoryId ? adminDb.collection('weeklyScheduleTargets').doc(`${weekStart}_${factoryId}`) : null
+  const snapshot = scopedRef ? await scopedRef.get() : await adminDb.collection('weeklyScheduleTargets').doc(weekStart).get()
+  const fallback = factoryId && !snapshot.exists ? await adminDb.collection('weeklyScheduleTargets').doc(weekStart).get() : null
   return {
     weekStart,
-    expectedEmployees: snapshot.exists ? Number(snapshot.get('expectedEmployees') || 0) : 0,
+    expectedEmployees: snapshot.exists ? Number(snapshot.get('expectedEmployees') || 0) : Number(fallback?.get('expectedEmployees') || 0),
   }
 }
 
@@ -156,7 +159,8 @@ export async function updateWeeklyScheduleTarget(actor: RequestActor, raw: unkno
   if (!Number.isInteger(expectedEmployees)) {
     throw new ApiError(400, 'Số nhân viên phải là số nguyên.')
   }
-  const ref = adminDb.collection('weeklyScheduleTargets').doc(weekStart)
+  const factoryId = actor.role === 'director' && isFactoryId(body.factoryId) ? body.factoryId : null
+  const ref = adminDb.collection('weeklyScheduleTargets').doc(factoryId ? `${weekStart}_${factoryId}` : weekStart)
   const current = await ref.get()
   await ref.set({
     weekStart,

@@ -498,7 +498,7 @@ export default function AdminRequestsPage() {
       <PageContainer>
         <FactorySwitcher factoryId={factoryId} onChange={setFactoryId} canSelect={role === 'director'} />
         {pageMode === 'penalties' && <MonthNavigator value={penaltyExportMonth} onChange={setPenaltyExportMonth} loading={penaltyMonthLoading} />}
-        {pageMode === 'requests' && <ManagementOverview employees={employees} />}
+        {pageMode === 'requests' && <ManagementOverview employees={employees} factoryId={factoryId} />}
         <div className="flex flex-col">
         {pageMode === 'penalties' && (
           <div className="order-1 mb-4 space-y-3">
