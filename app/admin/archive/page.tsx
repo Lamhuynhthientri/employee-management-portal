@@ -21,6 +21,7 @@ import { Header } from '@/components/layout/header'
 import { PageContainer } from '@/components/layout/page-container'
 import { Badge } from '@/components/ui/badge'
 import { LocalizedDateInput } from '@/components/ui/localized-date-input'
+import { AppLoadingScreen } from '@/components/ui/app-loading-screen'
 import { useAuth, useUserRole } from '@/lib/hooks/useAuth'
 import {
   listArchiveFiles,
@@ -214,7 +215,7 @@ function canonicalFiles(files: ArchiveFileSummary[]) {
 }
 
 export default function AdminArchivePage() {
-  const { authUser, isPreviewMode } = useAuth()
+  const { authUser, isLoading: authLoading, isPreviewMode } = useAuth()
   const role = useUserRole()
   const { factoryId, setFactoryId } = useManagementFactory()
   const [files, setFiles] = useState<ArchiveFileSummary[]>([])
@@ -589,7 +590,11 @@ export default function AdminArchivePage() {
     )
   }
 
-  if ((!role || !['admin', 'manager'].includes(role)) && !isPreviewMode) {
+  if (authLoading) {
+    return <AppLoadingScreen label="Đang kiểm tra quyền truy cập…" />
+  }
+
+  if ((!role || !['admin', 'manager', 'director'].includes(role)) && !isPreviewMode) {
     return <main className="min-h-screen"><Header title="Kho dữ liệu" /><PageContainer><div className="mobile-card p-8 text-center font-bold">Tài khoản không có quyền xem kho dữ liệu.</div></PageContainer></main>
   }
 
