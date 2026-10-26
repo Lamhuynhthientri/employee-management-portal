@@ -59,17 +59,9 @@ export default function Page() {
 
   useEffect(() => {
     if (!isLoading && !authUser) router.push('/auth/login')
-    if (!isLoading && authUser && !isPreviewMode && (
-      !employee ||
-      !employee.fullName?.trim() ||
-      !employee.employeeCode?.trim() ||
-      !employee.phone?.trim() ||
-      !employee.photoURL?.trim() ||
-      !employee.facebookUrl?.trim()
-    )) {
-      router.replace('/profile/setup')
-    }
-  }, [authUser, employee, isLoading, isPreviewMode, router])
+    // ProfileCompletionGuard checks the full profile after its snapshot arrives.
+    // The startup shell deliberately omits contact fields and is not incomplete.
+  }, [authUser, isLoading, router])
 
   useEffect(() => {
     if (!authUser || (role !== 'admin' && role !== 'manager' && role !== 'director')) return
