@@ -20,7 +20,7 @@ function referencedEmployeeId(record: ArchiveRecord): string {
 
 function belongsToFactory(record: ArchiveRecord, factoryId: string, allowedEmployeeIds: Set<string>): boolean {
   const data = record.data && typeof record.data === 'object' ? record.data as Record<string, unknown> : {}
-  if (String(data.factoryId || '') === factoryId) return true
+  if (isFactoryId(data.factoryId)) return data.factoryId === factoryId
   const employeeId = referencedEmployeeId(record)
   return Boolean(employeeId && allowedEmployeeIds.has(employeeId))
 }
@@ -55,7 +55,7 @@ export function scopeArchivePayload<T extends ArchivePayload>(actor: RequestActo
           const data = record.data && typeof record.data === 'object' ? record.data as Record<string, unknown> : {}
         return String(data.factoryId || 'factory-1') === factoryId
         })
-      : collectionRecords.filter((record) => belongsToFactory(record, actor.factoryId, allowedEmployeeIds)),
+      : collectionRecords.filter((record) => belongsToFactory(record, factoryId, allowedEmployeeIds)),
   ])) as Record<string, ArchiveRecord[]>
 
   return {

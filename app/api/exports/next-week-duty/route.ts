@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs'
 import { ApiError, authenticateRequest } from '@/lib/server/api-auth'
 import { adminDb } from '@/lib/server/firebase-admin'
 import { resolveFactoryScope } from '@/lib/server/factory-scope'
+import { Timestamp } from 'firebase-admin/firestore'
 
 export const runtime = 'nodejs'
 
@@ -84,16 +85,19 @@ export async function GET(request: Request) {
     const factoryId = resolveFactoryScope(actor, new URL(request.url).searchParams.get('factory'))
 
     const bounds = currentWeekBounds()
-    const [employeeSnapshot, scheduleSnapshot] = await Promise.all([
+    const startKey = dateKey(datePartsInVietnam(new Date(bounds.start.getTime() + 12 * 60 * 60 * 1000)))
+    const endKey = new Date(bounds.end.getTime() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    const [employeeSnapshot, timestampSchedules, legacySchedules] = await Promise.all([
       // Keep historical documents in Firestore, but only active employees
       // belong in the current operational roster.
       adminDb.collection('employees').get(),
-      // Schedule dates have existed as both Firestore Timestamps and legacy
-      // serialized values. Read the collection, then apply the canonical
-      // Vietnam date filter below so a UTC/local-time boundary cannot empty
-      // an otherwise valid next-week roster.
-      adminDb.collection('workSchedules').get(),
+      adminDb.collection('workSchedules')
+        .where('date', '>=', Timestamp.fromDate(new Date(`${startKey}T00:00:00+07:00`)))
+        .where('date', '<', Timestamp.fromDate(new Date(`${endKey}T00:00:00+07:00`))).get(),
+      // Retain legacy serialized dates without scanning every historical shift.
+      adminDb.collection('workSchedules').where('date', '>=', startKey).where('date', '<', endKey).get(),
     ])
+    const scheduleSnapshot = { docs: [...new Map([...timestampSchedules.docs, ...legacySchedules.docs].map((doc) => [doc.id, doc])).values()] }
     const employees: EmployeeRecord[] = employeeSnapshot.docs
       .map((snapshot) => ({ ...snapshot.data(), uid: snapshot.id }) as EmployeeRecord)
       .filter((employee) => employee.status === 'active')

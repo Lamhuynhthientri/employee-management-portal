@@ -105,7 +105,7 @@ export default function NextWeekStaffPage() {
   const [savingEdit, setSavingEdit] = useState(false)
   const [exportingNextWeek, setExportingNextWeek] = useState(false)
   const [exportingDuty, setExportingDuty] = useState(false)
-  // Friday-through-Sunday registrations belong to the following week, but management
+  // Saturday/Sunday registrations belong to the following week, but management
   // always views the week that is currently running.
   const days = useMemo(() => currentWeekDays(), [])
 

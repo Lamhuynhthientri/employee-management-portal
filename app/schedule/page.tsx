@@ -41,7 +41,8 @@ import { scheduleShareText } from '@/lib/archive/retention'
 import { submitStaffRequest } from '@/lib/services/staffRequestService'
 import { subscribeToEmployeePenalties } from '@/lib/services/penaltyService'
 import type { Penalty } from '@/lib/models/types'
-import { isManagementScheduleRole, isPastRegistrationDate, registrationTargetsNextWeek } from '@/lib/schedule/registration-policy'
+import { isManagementScheduleRole, isPastRegistrationDate, registrationTargetsNextWeek, scheduleFreeEditDeadline, scheduleRegistrationDeadline, managementScheduleDeadline, vietnamIsoWeekday, vietnamWeekKey } from '@/lib/schedule/registration-policy'
+import { formatVietnamDate, vietnamWeekContaining } from '@/lib/archive/retention'
 
 type Shift = 'Morning' | 'Afternoon' | 'Evening' | 'Custom'
 type DayItem = { key: string; name: string; shortName: string; date: Date }
@@ -104,8 +105,7 @@ const editSignature = (
 const scheduleDate = (value: WorkSchedule['date']) =>
   value instanceof Date ? value : value.toDate()
 
-const localDateKey = (date: Date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+const localDateKey = formatVietnamDate
 
 const valueDate = (value?: WorkSchedule['createdAt']) =>
   value ? (value instanceof Date ? value : value.toDate()) : null
@@ -130,6 +130,8 @@ export default function SchedulePage() {
   const [submittedPenaltyId, setSubmittedPenaltyId] = useState<string | null>(null)
   const [employeePenalties, setEmployeePenalties] = useState<Penalty[]>([])
   const [submittedEditDeadline, setSubmittedEditDeadline] = useState<Date | null>(null)
+  const [resubmissionWaived, setResubmissionWaived] = useState(false)
+  const [submittedFirstSchedule, setSubmittedFirstSchedule] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editingOriginStatus, setEditingOriginStatus] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -218,10 +220,10 @@ export default function SchedulePage() {
   useEffect(() => {
     const mode = new URLSearchParams(window.location.search).get('mode')
     const week = new URLSearchParams(window.location.search).get('week')
-    const weekday = new Date().getDay()
+    const weekday = vietnamIsoWeekday(new Date())
     setOvertimeMode(mode === 'overtime')
     setChangeMode(mode === 'change')
-    setCurrentWeekMode(mode === 'change' ? weekday !== 0 : week === 'current' && weekday >= 1 && weekday <= 4)
+    setCurrentWeekMode(mode === 'change' ? weekday !== 7 : week === 'current' && weekday >= 1 && weekday <= 5)
   }, [])
 
   useEffect(() => {
@@ -241,42 +243,27 @@ export default function SchedulePage() {
   const isNewEmployee = !managementSchedule && employee?.hasSubmittedSchedule !== true && hasExistingSchedules === false && !overtimeMode && !changeMode
 
   const currentWeekKey = useMemo(() => {
-    const now = new Date(referenceNow)
-    const weekday = now.getDay() || 7
-    now.setDate(now.getDate() - weekday + 1)
-    now.setHours(0, 0, 0, 0)
-    return localDateKey(now)
+    return vietnamWeekKey(new Date(referenceNow))
   }, [referenceNow])
   const reactivationWaiverWeekActive = employee?.reactivationScheduleWaiverWeekStart === currentWeekKey
 
   const days = useMemo<DayItem[]>(() => {
     const now = new Date()
-    const currentDay = now.getDay()
+    const currentDay = vietnamIsoWeekday(now)
     const regularRegistration = !overtimeMode && !changeMode
     const useCurrentWeek = currentWeekMode || (regularRegistration && (reactivationWaiverWeekActive || !registrationTargetsNextWeek(currentDay || 7)))
-    const daysUntilNextMonday = useCurrentWeek
-      ? -((currentDay || 7) - 1)
-      : ((8 - currentDay) % 7) || 7
-    const monday = new Date(now)
-    monday.setHours(0, 0, 0, 0)
-    monday.setDate(now.getDate() + daysUntilNextMonday)
+    const monday = new Date(vietnamWeekContaining(now).start.getTime() + (useCurrentWeek ? 0 : 7 * 24 * 60 * 60 * 1000))
     const names = ['Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy', 'Chủ Nhật']
     const shortNames = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']
     return names.map((name, index) => {
-      const date = new Date(monday)
-      date.setDate(monday.getDate() + index)
+      const date = new Date(monday.getTime() + index * 24 * 60 * 60 * 1000)
       return { key: localDateKey(date), name, shortName: shortNames[index], date }
     })
   }, [changeMode, currentWeekMode, overtimeMode, reactivationWaiverWeekActive])
 
   const targetIsCurrentWeek = useMemo(() => {
     if (!days.length) return false
-    const now = new Date()
-    const weekday = now.getDay() || 7
-    const monday = new Date(now)
-    monday.setDate(now.getDate() - weekday + 1)
-    monday.setHours(0, 0, 0, 0)
-    return days[0].key === localDateKey(monday)
+    return days[0].key === vietnamWeekKey(new Date())
   }, [days])
 
   const reactivationWaiverActive = reactivationWaiverWeekActive && targetIsCurrentWeek
@@ -405,7 +392,13 @@ export default function SchedulePage() {
           const loadedPenalty = current.find((item) => item.penaltyId || Number(item.penaltyAmount || 0) > 0)
           setSubmittedPenaltyId(loadedPenalty?.penaltyId || null)
           setSubmittedPenaltyAmount(Math.max(0, ...current.map((item) => Number(item.penaltyAmount || 0))))
-          setSubmittedEditDeadline(valueDate(current[0]?.editDeadlineAt))
+          setSubmittedFirstSchedule(current.some((item) => item.firstScheduleException === true))
+          const waiverUntil = current[0] ? scheduleRegistrationDeadline(scheduleDate(current[0].date)).getTime() + 24 * 60 * 60 * 1000 : 0
+          setResubmissionWaived(current.some((item) => item.allowSundayResubmissionWithoutPenalty === true) && Date.now() < waiverUntil)
+          const firstSubmitted = valueDate(current[0]?.firstSubmittedAt) || valueDate(current[0]?.createdAt) || new Date()
+          setSubmittedEditDeadline(current.length ? managementSchedule
+            ? managementScheduleDeadline(scheduleDate(current[0].date))
+            : scheduleFreeEditDeadline(scheduleDate(current[0].date), firstSubmitted) : null)
           if (current[0]?.status === 'Editing') {
             setEditingOriginStatus(current[0].editPreviousStatus || 'Pending')
             setEditing(true)
@@ -427,6 +420,8 @@ export default function SchedulePage() {
           setSubmittedPenaltyId(null)
           setSubmittedPenaltyAmount(0)
           setSubmittedEditDeadline(null)
+          setResubmissionWaived(false)
+          setSubmittedFirstSchedule(false)
           setEditingOriginStatus(null)
           setEditing(false)
           const savedDraft = window.sessionStorage.getItem('schedule-draft')
@@ -463,7 +458,7 @@ export default function SchedulePage() {
         setLoading(false)
       }
     )
-  }, [authUser, days, isPreviewMode, overtimeMode, changeMode])
+  }, [authUser, days, isPreviewMode, overtimeMode, changeMode, managementSchedule])
 
   const chooseShift = (dayKey: string, shift: Shift) => {
     if (isPastRegistrationDay(dayKey) && !original[dayKey]?.includes(shift)) {
@@ -516,7 +511,7 @@ export default function SchedulePage() {
         const isDuty = dutyDay === dayKey && shift === 'Afternoon'
         rows.push({
           employeeId: authUser!.uid,
-          date: new Date(`${dayKey}T12:00:00`),
+          date: new Date(`${dayKey}T12:00:00+07:00`),
           shift: shift === 'Custom' ? 'Morning' : shift,
           status: 'Pending',
           note: [
@@ -529,7 +524,7 @@ export default function SchedulePage() {
     if (dutyDay && !selected[dutyDay]?.includes('Afternoon')) {
       rows.push({
         employeeId: authUser!.uid,
-        date: new Date(`${dutyDay}T12:00:00`),
+        date: new Date(`${dutyDay}T12:00:00+07:00`),
         shift: 'Afternoon',
         status: 'Pending',
         note: '[DUTY_ONLY] Trực 17:00–17:30',
@@ -538,7 +533,7 @@ export default function SchedulePage() {
     if (!rows.length) {
       rows.push({
         employeeId: authUser!.uid,
-        date: new Date(`${restrictPastRegistration ? todayKey : days[0].key}T12:00:00`),
+        date: new Date(`${restrictPastRegistration ? todayKey : days[0].key}T12:00:00+07:00`),
         shift: 'Morning',
         status: 'Pending',
         note: '[NO_SHIFTS]',
@@ -556,7 +551,7 @@ export default function SchedulePage() {
           .filter((shift): shift is Exclude<Shift, 'Custom'> => shift !== 'Custom' && Boolean(returnableLeaveShifts[`${dayKey}-${shift}`]))
           .map((shift) => ({
             scheduleId: returnableLeaveShifts[`${dayKey}-${shift}`],
-            date: new Date(`${dayKey}T12:00:00`),
+            date: new Date(`${dayKey}T12:00:00+07:00`),
             shift,
           }))
       )
@@ -565,18 +560,18 @@ export default function SchedulePage() {
           .filter((shift) => !original[dayKey]?.includes(shift) && (shift === 'Custom' || !returnableLeaveShifts[`${dayKey}-${shift}`]))
           .map((shift) => shift === 'Custom'
             ? {
-                date: new Date(`${dayKey}T12:00:00`),
+                date: new Date(`${dayKey}T12:00:00+07:00`),
                 shift: 'Morning' as const,
                 note: `[CUSTOM:${customData[dayKey]?.start || '08:00'}-${customData[dayKey]?.end || '17:00'}]`,
               }
-            : { date: new Date(`${dayKey}T12:00:00`), shift })
+            : { date: new Date(`${dayKey}T12:00:00+07:00`), shift })
       )
       const removedShifts = Object.entries(original).flatMap(([dayKey, originalShifts]) =>
         originalShifts
           .filter((shift): shift is Exclude<Shift, 'Custom'> => shift !== 'Custom' && !selected[dayKey]?.includes(shift))
           .map((shift) => ({
             scheduleId: originalScheduleIds[`${dayKey}-${shift}`],
-            date: new Date(`${dayKey}T12:00:00`),
+            date: new Date(`${dayKey}T12:00:00+07:00`),
             shift,
           }))
           .filter((item) => Boolean(item.scheduleId))
@@ -789,9 +784,14 @@ export default function SchedulePage() {
   const missingDays = managementSchedule ? [] : days.filter((day) => !isPastRegistrationDay(day.key) && !selected[day.key]?.length && dutyDay !== day.key)
   const compactMode = submittedIds.length > 0 && !editing && !overtimeMode && !changeMode
   const canEditStatus = ['Pending', 'Rejected', 'Approved'].includes(submittedStatus || '')
-  const editWindowOpen = !submittedEditDeadline || clockNow < submittedEditDeadline.getTime()
+  const rejectedCanResubmit = submittedStatus === 'Rejected' && days.length > 0 && clockNow < vietnamWeekContaining(days[0].date).end.getTime()
+  const editWindowOpen = rejectedCanResubmit || !submittedEditDeadline || clockNow < submittedEditDeadline.getTime()
   const canEdit = canEditStatus && editWindowOpen
-  const lateScheduleWarning = !managementSchedule && !overtimeMode && !changeMode && !editing && !submittedIds.length && targetIsCurrentWeek && !isNewEmployee && !reactivationWaiverActive && employee?.scheduleMode !== 'fixed'
+  const lateScheduleWarning = !managementSchedule && !overtimeMode && !changeMode && targetIsCurrentWeek &&
+    !isNewEmployee && !reactivationWaiverActive && employee?.scheduleMode !== 'fixed' && (
+      (!editing && !submittedIds.length) ||
+      (editing && editingOriginStatus === 'Rejected' && !resubmissionWaived && !submittedFirstSchedule && submittedPenaltyAmount === 0)
+    )
   const scheduleWeekEnd = new Date(days[days.length - 1]?.date || days[0]?.date || new Date())
   scheduleWeekEnd.setHours(23, 59, 59, 999)
   const fallbackSchedulePenalty = employeePenalties.find((item) => {
@@ -1022,7 +1022,7 @@ export default function SchedulePage() {
         {lateScheduleWarning && (
           <div className="mb-4 flex items-start gap-3 rounded-3xl border border-rose-200 bg-rose-50 p-4 text-rose-900 shadow-sm dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-rose-600 dark:text-rose-300" />
-            <div className="text-sm leading-6"><p className="font-extrabold">Đăng ký lịch tuần này đã trễ hạn</p><p className="mt-1">Nếu bạn xác nhận, hệ thống sẽ ghi nhận khoản phạt đăng ký trễ <strong>{latePenaltyDisplayAmount.toLocaleString('vi-VN')}đ</strong>. Nếu đang nghỉ bệnh, bạn có thể liên hệ quản lý và chờ đến Thứ Sáu để nhập lịch tuần sau.</p></div>
+            <div className="text-sm leading-6"><p className="font-extrabold">Đăng ký lịch tuần này đã trễ hạn</p><p className="mt-1">Nếu bạn xác nhận, hệ thống sẽ ghi nhận khoản phạt đăng ký trễ <strong>{latePenaltyDisplayAmount.toLocaleString('vi-VN')}đ</strong>. Nếu đang nghỉ bệnh, bạn có thể liên hệ quản lý và chờ đến Thứ Bảy để nhập lịch tuần sau.</p></div>
           </div>
         )}
         {changeMode && submittedChangeSummary && (
@@ -1280,7 +1280,7 @@ export default function SchedulePage() {
             </div>
             <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm leading-6 text-rose-900 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100">
               <p className="font-black">Bạn sẽ bị trừ {latePenaltyDisplayAmount.toLocaleString('vi-VN')}đ.</p>
-              <p className="mt-1">Nếu tuần này bạn nghỉ bệnh hoặc có lý do chính đáng, hãy liên hệ quản lý và chờ đến Thứ Sáu để nhập lịch tuần sau. Nếu vẫn xác nhận, khoản trừ sẽ tiếp tục được ghi nhận.</p>
+              <p className="mt-1">Nếu tuần này bạn nghỉ bệnh hoặc có lý do chính đáng, hãy liên hệ quản lý và chờ đến Thứ Bảy để nhập lịch tuần sau. Nếu vẫn xác nhận, khoản trừ sẽ tiếp tục được ghi nhận.</p>
             </div>
             <div className="mt-5 grid grid-cols-2 gap-2">
               <button type="button" onClick={() => setLatePenaltyConfirmationOpen(false)} className="min-h-12 rounded-2xl border border-slate-200 font-bold dark:border-slate-700">Hủy xác nhận</button>

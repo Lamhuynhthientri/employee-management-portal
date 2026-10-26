@@ -55,8 +55,8 @@ for (const route of ['/admin/dashboard', '/admin/dashboard?view=employees', '/ad
     await page.goto(route, { waitUntil: 'domcontentloaded' })
     await expect(page.locator('body')).toBeVisible()
     if (route === '/admin/next-week') {
-      await expect(page.getByRole('button', { name: 'Xuất lịch nhân sự tuần tới ra Excel' })).toBeVisible()
-      await expect(page.getByRole('button', { name: 'Xuất lịch trực tuần tới ra Excel' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Xuất lịch nhân sự tuần này ra Excel' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Xuất lịch trực tuần này ra Excel' })).toBeVisible()
     }
     await strictUiAudit(page)
   })

@@ -5,6 +5,8 @@ import type { EmployeeReviewContext, EmployeeReviewLevel, EmployeeReviewWeek } f
 import { adminDb } from '@/lib/server/firebase-admin'
 import { listWeeklyArchives, readWeeklyArchive } from '@/lib/server/google-drive-archive'
 import { workflowPolicy } from '@/lib/server/workflow-policy'
+import { ApiError, requireManager, type RequestActor } from '@/lib/server/api-auth'
+import { unstable_cache } from 'next/cache'
 
 type ReviewCollection = 'workSchedules' | 'leaveRequests' | 'lateRequests' | 'penalties'
 
@@ -283,10 +285,22 @@ async function archivedRecords(employeeId: string, weekKeys: string[]): Promise<
 
 export async function buildEmployeeReviewContext(
   employeeId: string,
-  referenceDate: Date
+  referenceDate: Date,
+  actor: RequestActor,
 ): Promise<EmployeeReviewContext> {
+  requireManager(actor)
   const employee = await adminDb.collection('employees').doc(employeeId).get()
-  if (!employee.exists || employee.get('role') !== 'employee') throw new Error('Không tìm thấy nhân viên cần kiểm tra.')
+  if (!employee.exists || employee.get('role') !== 'employee') throw new ApiError(404, 'Không tìm thấy nhân viên cần kiểm tra.')
+  if (actor.role !== 'director' && String(employee.get('factoryId') || 'factory-1') !== actor.factoryId) {
+    throw new ApiError(403, 'Bạn chỉ được kiểm tra nhân viên thuộc xưởng mình.')
+  }
+
+  // Authorization runs for every request, before shared data may be reused.
+  return unstable_cache(() => loadEmployeeReview(employeeId, referenceDate),
+    ['employee-review-v2', employeeId, mondayKey(referenceDate)], { revalidate: 30 })()
+}
+
+async function loadEmployeeReview(employeeId: string, referenceDate: Date): Promise<EmployeeReviewContext> {
 
   const referenceWeekStart = mondayKey(referenceDate)
   const weekKeys = Array.from({ length: 4 }, (_, index) => shiftKey(referenceWeekStart, (index - 3) * 7))

@@ -15,10 +15,8 @@ import {
   deleteDoc,
   doc,
   getDoc,
-  serverTimestamp,
-  setDoc,
 } from 'firebase/firestore'
-import app, { db } from '@/lib/firebase'
+import app, { auth, db } from '@/lib/firebase'
 
 const SERVICE_WORKER_PATH = '/firebase-messaging-sw.js'
 
@@ -62,32 +60,17 @@ async function getMessagingInstance(): Promise<Messaging> {
 }
 
 async function saveDeviceRegistration(employeeId: string, fid: string): Promise<void> {
-  const deviceRef = doc(
-    db,
-    'employees',
-    employeeId,
-    'notificationDevices',
-    fid
-  )
-  const existingDevice = await getDoc(deviceRef)
-  const deviceData = {
-    employeeId,
-    fid,
-    platform: navigator.userAgent.slice(0, 300),
-    permission: 'granted' as const,
-    updatedAt: serverTimestamp(),
-    lastSeenAt: serverTimestamp(),
-  }
-
-  if (existingDevice.exists()) {
-    await setDoc(deviceRef, deviceData, { merge: true })
-    return
-  }
-
-  await setDoc(deviceRef, {
-    ...deviceData,
-    createdAt: serverTimestamp(),
+  const user = auth.currentUser
+  if (!user || user.uid !== employeeId) throw new Error('Bạn cần đăng nhập lại để đăng ký thông báo.')
+  const response = await fetch('/api/notification-devices', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${await user.getIdToken()}` },
+    body: JSON.stringify({ fid, platform: navigator.userAgent.slice(0, 300) }),
   })
+  if (!response.ok) {
+    const result = await response.json().catch(() => null) as { error?: string } | null
+    throw new Error(result?.error || 'Chưa thể đăng ký thông báo.')
+  }
 }
 
 function observeRegistrationChanges(

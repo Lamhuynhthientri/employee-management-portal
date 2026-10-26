@@ -10,7 +10,7 @@ import { deleteAllProfileImages } from '@/lib/server/google-drive-archive'
 import { defaultUserFeatureSettings, userFeatureKeys, type UserFeatureKey, type UserFeatureSettings } from '@/lib/models/userFeatureSettings'
 import { currentVietnamMonth, vietnamWeekContaining } from '@/lib/archive/retention'
 import { decisionReviewIsEditable } from '@/lib/review/decision-policy'
-import { isManagementScheduleRole, isPastRegistrationDate, reactivationWaiverApplies, registrationTargetsNextWeek, restrictPastRegistration } from '@/lib/schedule/registration-policy'
+import { isAllowedMaterializationWeek, isCalendarDateKey, isManagementScheduleRole, isPastRegistrationDate, reactivationWaiverApplies, registrationTargetsNextWeek, restrictPastRegistration, scheduleRegistrationDeadline, scheduleFreeEditDeadline, managementScheduleDeadline, vietnamWeekKey, vietnamIsoWeekday } from '@/lib/schedule/registration-policy'
 import { parseCustomShiftNote, scheduleShiftIdentity } from '@/lib/schedule/custom-shift'
 import { salaryAdvanceWindowState } from '@/lib/salary/advance-policy'
 import { FACTORY_IDS, FACTORY_LABELS, isFactoryId, type FactoryId } from '@/lib/models/factory'
@@ -80,7 +80,7 @@ function requestId(body: Record<string, unknown>): string {
 
 function weekKey(value: unknown): string {
   const result = text(value, 'Tuần áp dụng', 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(result)) {
+  if (!isCalendarDateKey(result) || vietnamWeekKey(new Date(`${result}T00:00:00+07:00`)) !== result) {
     throw new ApiError(400, 'Tuần áp dụng không hợp lệ.')
   }
   return result
@@ -88,7 +88,7 @@ function weekKey(value: unknown): string {
 
 function calendarDateKey(value: unknown, field: string): string {
   const result = text(value, field, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(result) || Number.isNaN(new Date(`${result}T12:00:00+07:00`).getTime())) {
+  if (!isCalendarDateKey(result)) {
     throw new ApiError(400, `${field} khÃ´ng há»£p lá»‡.`)
   }
   return result
@@ -98,7 +98,7 @@ export async function getWeeklyScheduleTarget(actor: RequestActor, raw: unknown)
   requireManager(actor)
   const body = objectBody(raw)
   const weekStart = weekKey(body.weekStart)
-  const factoryId = actor.role === 'director' && isFactoryId(body.factoryId) ? body.factoryId : null
+  const factoryId = actor.role === 'director' && isFactoryId(body.factoryId) ? body.factoryId : actor.factoryId
   const scopedRef = factoryId ? adminDb.collection('weeklyScheduleTargets').doc(`${weekStart}_${factoryId}`) : null
   const snapshot = scopedRef ? await scopedRef.get() : await adminDb.collection('weeklyScheduleTargets').doc(weekStart).get()
   const fallback = factoryId && !snapshot.exists ? await adminDb.collection('weeklyScheduleTargets').doc(weekStart).get() : null
@@ -159,7 +159,7 @@ export async function updateWeeklyScheduleTarget(actor: RequestActor, raw: unkno
   if (!Number.isInteger(expectedEmployees)) {
     throw new ApiError(400, 'Số nhân viên phải là số nguyên.')
   }
-  const factoryId = actor.role === 'director' && isFactoryId(body.factoryId) ? body.factoryId : null
+  const factoryId = actor.role === 'director' && isFactoryId(body.factoryId) ? body.factoryId : actor.factoryId
   const ref = adminDb.collection('weeklyScheduleTargets').doc(factoryId ? `${weekStart}_${factoryId}` : weekStart)
   const current = await ref.get()
   await ref.set({
@@ -350,7 +350,11 @@ export async function manageEmployeeStatus(actor: RequestActor, raw: unknown) {
     const firstSelectionFields = status === 'active' && !employee.get('scheduleModeInitialSelectionDeadlineAt') && !employee.get('scheduleModeInitialSelectionCompletedAt')
       ? { scheduleModeInitialSelectionDeadlineAt: Timestamp.fromDate(new Date(Date.now() + 24 * 60 * 60 * 1000)) }
       : {}
-    transaction.set(employeeRef, { status, statusChangedBy: actor.uid, statusChangedAt: now, updatedAt: now, ...firstSelectionFields, ...reactivationFields }, { merge: true })
+    transaction.set(employeeRef, {
+      status, statusChangedBy: actor.uid, statusChangedAt: now, updatedAt: now,
+      ...(status === 'inactive' ? { sessionsValidAfter: Math.floor(Date.now() / 1000) } : {}),
+      ...firstSelectionFields, ...reactivationFields,
+    }, { merge: true })
     schedulesToRelease.forEach((schedule) => transaction.set(schedule.ref, {
       status: 'Cancelled',
       lockedAt: null,
@@ -774,7 +778,7 @@ async function activeManagerIds(factoryId?: string): Promise<string[]> {
     .where('role', 'in', ['admin', 'manager'])
     .get()
   return snapshot.docs
-    .filter((item) => !factoryId || String(item.get('factoryId') || 'factory-1') === factoryId)
+    .filter((item) => item.get('status') === 'active' && (!factoryId || String(item.get('factoryId') || 'factory-1') === factoryId))
     .map((item) => item.id)
 }
 
@@ -785,7 +789,7 @@ function assertManagerFactoryAccess(actor: RequestActor, employee: { get(field: 
 }
 
 function scheduleBatchKey(employeeId: string, weekStart: Date): string {
-  return `${employeeId}-${weekStart.toISOString().slice(0, 10)}`
+  return `${employeeId}-${vietnamWeekKey(weekStart)}`
 }
 
 function managerNotificationRef(managerId: string, sourceKey: string) {
@@ -849,11 +853,7 @@ const managerRequestCopy = {
 } as const
 
 function mondayFor(date: Date): Date {
-  const result = new Date(date)
-  const day = result.getUTCDay()
-  result.setUTCDate(result.getUTCDate() - ((day + 6) % 7))
-  result.setUTCHours(0, 0, 0, 0)
-  return result
+  return vietnamWeekContaining(date).start
 }
 
 function vietnamDateKey(date: Date): string {
@@ -866,51 +866,23 @@ function vietnamDateKey(date: Date): string {
 }
 
 function vietnamWeekdayNumber(date: Date): number {
-  const weekdayName = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Ho_Chi_Minh',
-    weekday: 'short',
-  }).format(date)
-  return ({ Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 } as Record<string, number>)[weekdayName] || 1
+  return vietnamIsoWeekday(date)
 }
 
 function scheduleDeadline(firstShift: Date): Date {
-  const monday = mondayFor(firstShift)
-  // Nhân viên được tạo và sửa tự do hết Thứ Bảy. Từ 00:00 Chủ Nhật mới tính là trễ.
-  return new Date(
-    Date.UTC(
-      monday.getUTCFullYear(),
-      monday.getUTCMonth(),
-      monday.getUTCDate() - 1,
-      -7,
-      0,
-      0
-    )
-  )
+  return scheduleRegistrationDeadline(firstShift)
 }
 
 function scheduleEditDeadline(firstShift: Date, firstSubmittedAt: Date): Date {
-  const registrationDeadline = scheduleDeadline(firstShift)
-  if (firstSubmittedAt.getTime() < registrationDeadline.getTime()) {
-    return new Date(registrationDeadline.getTime() + 24 * 60 * 60 * 1000)
-  }
-
-  const submittedDateKey = vietnamDateKey(firstSubmittedAt)
-  const submittedMidnight = new Date(`${submittedDateKey}T00:00:00+07:00`)
-  return new Date(submittedMidnight.getTime() + 24 * 60 * 60 * 1000)
+  return scheduleFreeEditDeadline(firstShift, firstSubmittedAt)
 }
 
 function managementScheduleReset(firstShift: Date): Date {
-  const mondayKey = vietnamWeekStartKey(firstShift)
-  const monday = new Date(`${mondayKey}T00:00:00+07:00`)
-  return new Date(monday.getTime() + 4 * 24 * 60 * 60 * 1000)
+  return managementScheduleDeadline(firstShift)
 }
 
 function vietnamWeekStartKey(date: Date, weeksFromCurrent = 0): string {
-  const dateKey = vietnamDateKey(date)
-  const base = new Date(`${dateKey}T12:00:00+07:00`)
-  const weekday = vietnamWeekdayNumber(base)
-  base.setUTCDate(base.getUTCDate() - (weekday - 1) + weeksFromCurrent * 7)
-  return vietnamDateKey(base)
+  return vietnamWeekKey(date, weeksFromCurrent)
 }
 
 function employeeScheduleMode(data: Record<string, unknown>): 'rotating' | 'fixed' {
@@ -1120,8 +1092,9 @@ export async function ensureFixedSchedule(actor: RequestActor, raw: unknown) {
   requireStaff(actor)
   const body = objectBody(raw)
   const targetWeekStart = weekKey(body.weekStart)
+  if (!isAllowedMaterializationWeek(targetWeekStart)) throw new ApiError(400, 'Chỉ được tạo lịch cố định tuần hiện tại hoặc tuần kế tiếp đã mở đăng ký.')
   const employeeId = typeof body.employeeId === 'string' ? text(body.employeeId, 'Nhân viên', 128) : actor.uid
-  if (employeeId !== actor.uid && !['admin', 'manager'].includes(actor.role)) {
+  if (employeeId !== actor.uid && !['admin', 'manager', 'director'].includes(actor.role)) {
     throw new ApiError(403, 'Chỉ quản lý mới có thể đồng bộ lịch cố định của nhân viên khác.')
   }
   const employeeRef = adminDb.collection('employees').doc(employeeId)
@@ -1129,9 +1102,10 @@ export async function ensureFixedSchedule(actor: RequestActor, raw: unknown) {
   if (!employeeSnapshot.exists) throw new ApiError(404, 'Chưa tìm thấy hồ sơ nhân viên.')
   const employeeData = employeeSnapshot.data() as Record<string, unknown>
   const employeeFactoryId = String(employeeData.factoryId || 'factory-1')
-  if (employeeId !== actor.uid && employeeFactoryId !== actor.factoryId) {
+  if (employeeId !== actor.uid && actor.role !== 'director' && employeeFactoryId !== actor.factoryId) {
     throw new ApiError(403, 'Bạn chỉ được đồng bộ lịch của nhân viên thuộc xưởng mình.')
   }
+  if (employeeData.status !== 'active') throw new ApiError(403, 'Chỉ tài khoản đang hoạt động mới được đồng bộ lịch.')
   const managementSchedule = isManagementScheduleRole(employeeData.role)
   if (!managementSchedule && employeeScheduleMode(employeeData) !== 'fixed') return { created: false, ids: [], needsSetup: false }
 
@@ -1151,7 +1125,10 @@ export async function ensureFixedSchedule(actor: RequestActor, raw: unknown) {
     return { created: false, ids: [], needsSetup: false }
   }
 
-  const allSchedules = await adminDb.collection('workSchedules').where('employeeId', '==', employeeId).get()
+  const allSchedules = await adminDb.collection('workSchedules')
+    .where('employeeId', '==', employeeId)
+    .where('date', '<', Timestamp.fromDate(targetStart))
+    .orderBy('date', 'desc').limit(168).get()
   const candidates = allSchedules.docs.filter((snapshot) => {
     const data = snapshot.data()
     if (['Rejected', 'Draft'].includes(String(data.status))) return false
@@ -1210,7 +1187,7 @@ export async function ensureFixedSchedule(actor: RequestActor, raw: unknown) {
         reviewedBy: 'system:fixed-schedule',
         reviewedAt: serverNow,
         firstSubmittedAt: Timestamp.fromDate(now),
-        editDeadlineAt: Timestamp.fromDate(managementSchedule ? managementScheduleReset(targetMonday) : targetMonday),
+        editDeadlineAt: Timestamp.fromDate(managementSchedule ? managementScheduleReset(targetMonday) : scheduleEditDeadline(targetMonday, now)),
         createdAt: serverNow,
         updatedAt: serverNow,
         lockedAt: serverNow,
@@ -1283,15 +1260,18 @@ export async function submitSchedules(actor: RequestActor, raw: unknown) {
 
   const firstDate = schedules.reduce((min, row) => row.date < min ? row.date : min, schedules[0].date)
   const requestTime = new Date()
+  const targetWeek = vietnamWeekStartKey(firstDate)
+  if (![vietnamWeekStartKey(requestTime), vietnamWeekStartKey(requestTime, 1)].includes(targetWeek) ||
+    schedules.some((schedule) => vietnamWeekStartKey(schedule.date) !== targetWeek)) {
+    throw new ApiError(400, 'Các ca phải thuộc cùng tuần hiện tại hoặc tuần kế tiếp.')
+  }
   const isLate = requestTime.getTime() >= scheduleDeadline(firstDate).getTime()
   const editDeadlineAt = managementSchedule
     ? managementScheduleReset(firstDate)
     : scheduleEditDeadline(firstDate, requestTime)
   const weekStart = mondayFor(firstDate)
   const scheduleWeekStartKey = vietnamWeekStartKey(firstDate)
-  const weekEnd = new Date(weekStart)
-  weekEnd.setUTCDate(weekEnd.getUTCDate() + 6)
-  weekEnd.setUTCHours(23, 59, 59, 999)
+  const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000 - 1)
   const longLeaveSnapshots = await adminDb.collection('leaveRequests')
     .where('employeeId', '==', actor.uid)
     .where('duration', '==', 'long')
@@ -1341,8 +1321,8 @@ export async function submitSchedules(actor: RequestActor, raw: unknown) {
     : vietnamWeekStartKey(requestTime)
   if ((managementSchedule || !fixedModeActive) && !reactivationWaiverActive && scheduleWeekStartKey !== openWeekStartKey) {
     throw new ApiError(409, targetsNextWeek
-      ? 'Tuần đăng ký mới đã được mở từ Thứ Sáu. Hãy chọn tuần kế tiếp.'
-      : 'Từ Thứ Hai đến Thứ Năm, bạn chỉ được nhập lịch tuần hiện tại. Lịch tuần sau sẽ mở vào Thứ Sáu.')
+      ? 'Tuần đăng ký mới đã được mở từ Thứ Bảy. Hãy chọn tuần kế tiếp.'
+      : 'Từ Thứ Hai đến Thứ Sáu, bạn chỉ được nhập lịch tuần hiện tại. Lịch tuần sau sẽ mở vào Thứ Bảy.')
   }
   if (schedules.some((schedule) => vietnamWeekStartKey(schedule.date) !== scheduleWeekStartKey)) {
     throw new ApiError(400, 'Các ca đăng ký phải thuộc cùng một tuần.')
@@ -1859,7 +1839,11 @@ export async function replaceSchedules(actor: RequestActor, raw: unknown) {
       ? managementScheduleReset((oldData[0].date as Timestamp).toDate())
       : scheduleEditDeadline((oldData[0].date as Timestamp).toDate(), firstSubmittedAt)
     resultingEditDeadline = editDeadlineAt
-    const rejectedByManager = oldData.every((schedule) => schedule.status === 'Rejected')
+    const rejectedByManager = oldData.every((schedule) => schedule.status === 'Rejected' ||
+      (schedule.status === 'Editing' && schedule.editPreviousStatus === 'Rejected'))
+    if (rejectedByManager && requestTime >= vietnamWeekContaining((oldData[0].date as Timestamp).toDate()).end) {
+      throw new ApiError(409, 'Tuần làm việc đã kết thúc. Không thể gửi lại lịch cũ.')
+    }
     if (!rejectedByManager && requestTime.getTime() >= editDeadlineAt.getTime()) {
       throw new ApiError(409, 'Bảng lịch đã hết hạn điều chỉnh và hiện đã được khóa.')
     }
@@ -1868,7 +1852,8 @@ export async function replaceSchedules(actor: RequestActor, raw: unknown) {
     const hasSundayWaiver = oldData.some((schedule) => schedule.allowSundayResubmissionWithoutPenalty === true) && requestTime < waiverDeadline
     const reactivationWaiverActive = employeeSnapshot.get('reactivationScheduleWaiverWeekStart') === vietnamWeekStartKey(requestTime) &&
       oldWeekStartKey === vietnamWeekStartKey(requestTime)
-    const lateRejectedResubmission = !managementSchedule && rejectedByManager && requestTime >= scheduleDeadline((oldData[0].date as Timestamp).toDate()) && !hasSundayWaiver && !reactivationWaiverActive
+    const lateRejectedResubmission = !managementSchedule && !retainedFixedSchedule && !retainedFirstScheduleException &&
+      rejectedByManager && requestTime >= scheduleDeadline((oldData[0].date as Timestamp).toDate()) && !hasSundayWaiver && !reactivationWaiverActive
     const retainedPenaltyId = managementSchedule
       ? null
       : previousPenaltyId || (lateRejectedResubmission ? `schedule-resubmit-${actor.uid}-${id}` : null)
@@ -1900,7 +1885,7 @@ export async function replaceSchedules(actor: RequestActor, raw: unknown) {
           employeeId: actor.uid,
           factoryId: actor.factoryId,
           title: 'Đăng ký lại lịch trễ hạn',
-          description: `Gửi lại lịch sau 00:00 Thứ Hai. Khấu trừ ${workflowPolicy.scheduleLatePenalty.toLocaleString('vi-VN')}đ.`,
+          description: `Gửi lại lịch sau hạn đăng ký. Khấu trừ ${workflowPolicy.scheduleLatePenalty.toLocaleString('vi-VN')}đ.`,
           category: 'Late',
           amount: workflowPolicy.scheduleLatePenalty,
           sourceType: 'scheduleResubmission',
@@ -2024,8 +2009,10 @@ export async function setScheduleBatchEditing(actor: RequestActor, raw: unknown)
         .sort((left, right) => left.getTime() - right.getTime())[0] || new Date()
       const editDeadlineAt = managementSchedule
         ? managementScheduleReset((schedules[0].date as Timestamp).toDate())
-        : firestoreDate(schedules[0].editDeadlineAt) || scheduleEditDeadline((schedules[0].date as Timestamp).toDate(), firstSubmittedAt)
-      if (Date.now() >= editDeadlineAt.getTime()) {
+        : scheduleEditDeadline((schedules[0].date as Timestamp).toDate(), firstSubmittedAt)
+      const rejectedResubmission = schedules.every((schedule) => schedule.status === 'Rejected') &&
+        Date.now() < vietnamWeekContaining((schedules[0].date as Timestamp).toDate()).end.getTime()
+      if (Date.now() >= editDeadlineAt.getTime() && !rejectedResubmission) {
         throw new ApiError(409, 'Bảng lịch đã hết hạn điều chỉnh và hiện đã được khóa.')
       }
       refs.forEach((ref, index) => transaction.set(ref, {
@@ -2134,6 +2121,8 @@ export async function submitLeave(actor: RequestActor, raw: unknown) {
     weekEnd.setUTCDate(weekEnd.getUTCDate() + 7)
     const weeklySchedules = await transaction.get(
       adminDb.collection('workSchedules').where('employeeId', '==', actor.uid)
+        .where('date', '>=', Timestamp.fromDate(weekStart))
+        .where('date', '<', Timestamp.fromDate(weekEnd))
     )
     const selectedIds = new Set(workScheduleIds)
     weeklyShiftCount = weeklySchedules.docs.filter((snapshot) => {
@@ -2144,6 +2133,7 @@ export async function submitLeave(actor: RequestActor, raw: unknown) {
     weeklyShiftCountAfterLeave = Math.max(0, weeklyShiftCount - selectedIds.size)
     transaction.create(leaveRef, {
       employeeId: actor.uid,
+      factoryId: actor.factoryId,
       ...(workScheduleIds.length ? {
         workScheduleId: workScheduleIds[0],
         workScheduleIds,
@@ -2208,7 +2198,7 @@ export async function submitLeave(actor: RequestActor, raw: unknown) {
 export async function normalizeLeaveRequests(actor: RequestActor, raw: unknown) {
   requireStaff(actor)
   objectBody(raw)
-  const leavesQuery = adminDb.collection('leaveRequests').where('employeeId', '==', actor.uid)
+  const leavesQuery = adminDb.collection('leaveRequests').where('employeeId', '==', actor.uid).where('status', '==', 'Pending')
   const snapshot = await leavesQuery.get()
   const createdMillis = (value: unknown) => value instanceof Timestamp ? value.toMillis() : 0
   const pending = snapshot.docs
@@ -2327,6 +2317,7 @@ export async function submitLate(actor: RequestActor, raw: unknown) {
     const first = entries[0]
     transaction.create(lateRef, {
       employeeId: actor.uid,
+      factoryId: actor.factoryId,
       workScheduleId: first.scheduleId,
       workScheduleIds: scheduleIds,
       date: first.scheduleDate,
@@ -3680,9 +3671,13 @@ export async function reviewScheduleBatch(actor: RequestActor, raw: unknown) {
       .map((schedule) => firestoreDate(schedule.firstSubmittedAt) || firestoreDate(schedule.createdAt))
       .filter((value): value is Date => Boolean(value))
       .sort((left, right) => left.getTime() - right.getTime())[0]
+    const registrationDeadline = scheduleDeadline((schedules[0].date as Timestamp).toDate())
+    // Legacy field name is kept for existing clients. The opt-in now applies
+    // on the first late day (Monday for cycles from 02/11 onward).
     allowSundayResubmissionWithoutPenalty = status === 'Rejected' &&
-      vietnamWeekdayNumber(new Date()) === 7 &&
-      Boolean(firstSubmittedAt && vietnamWeekdayNumber(firstSubmittedAt) === 6)
+      body.allowSundayResubmissionWithoutPenalty === true &&
+      vietnamDateKey(new Date()) === vietnamDateKey(registrationDeadline) &&
+      Boolean(firstSubmittedAt && firstSubmittedAt < registrationDeadline)
     if (schedules.some((schedule) =>
       schedule.employeeId !== employeeId ||
       mondayFor((schedule.date as Timestamp).toDate()).toISOString() !== week ||

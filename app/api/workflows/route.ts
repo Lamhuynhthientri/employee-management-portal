@@ -43,10 +43,11 @@ import {
   submitStaffRequest,
   submitSchedules,
 } from '@/lib/server/workflows'
-import { recordCompletedWorkflowAudit } from '@/lib/server/audit-trail'
+import { recordCompletedWorkflowAudit, workflowNeedsAudit } from '@/lib/server/audit-trail'
 import { dispatchQueuedAuditEmails } from '@/lib/server/audit-email'
 import { invalidateMonthDataCache } from '@/lib/server/month-data-cache'
 import { getOperationalHealth, reportOperationalFailure, runOperationalHealthNow } from '@/lib/server/operational-health'
+import { limitBurst, readJsonBody } from '@/lib/server/request-limits'
 
 export const runtime = 'nodejs'
 export const maxDuration = 30
@@ -185,20 +186,19 @@ function safeServerError(error: unknown): { status: number; message: string } {
 export async function POST(request: Request) {
   try {
     const actor = await authenticateRequest(request)
-    const body = await request.json()
+    limitBurst(`workflows:${actor.uid}`, 90)
+    const body = await readJsonBody(request)
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       throw new ApiError(400, 'Dữ liệu gửi lên không hợp lệ.')
     }
     const { action, ...payload } = body as Record<string, unknown>
-    if (typeof action !== 'string' || !(action in handlers)) {
+    if (typeof action !== 'string' || !Object.hasOwn(handlers, action)) {
       throw new ApiError(400, 'Nghiệp vụ không hợp lệ.')
     }
+    if (diagnosticActions.has(action)) limitBurst(`diagnostics:${actor.uid}`, 6)
     const result = await handlers[action as keyof typeof handlers](actor, payload)
     if (monthDataMutationActions.has(action)) invalidateMonthDataCache()
-    const isIdempotentReplay = Boolean(
-      result && typeof result === 'object' && (result as Record<string, unknown>).idempotentReplay === true,
-    )
-    if (!diagnosticActions.has(action) && !isIdempotentReplay) {
+    if (!diagnosticActions.has(action) && workflowNeedsAudit(action, result)) {
       try {
         await recordCompletedWorkflowAudit({ actor, action, payload, result })
         await dispatchQueuedAuditEmails()

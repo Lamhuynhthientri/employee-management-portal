@@ -16,7 +16,8 @@ import { Badge } from '@/components/ui/badge'
 import { OtherRequestWorkspace } from '@/components/admin/other-request-workspace'
 import { RequestIdentityAvatar } from '@/components/admin/request-identity-avatar'
 import { profileImageUrl } from '@/lib/utils/profileImage'
-import { isManagementScheduleRole, registrationTargetsNextWeek } from '@/lib/schedule/registration-policy'
+import { isManagementScheduleRole, registrationTargetsNextWeek, resubmissionGraceAvailable, vietnamWeekKey, vietnamIsoWeekday } from '@/lib/schedule/registration-policy'
+import { formatVietnamDate } from '@/lib/archive/retention'
 import { useManagementFactory } from '@/lib/hooks/useManagementFactory'
 import { FactorySwitcher } from '@/components/admin/factory-switcher'
 
@@ -45,29 +46,19 @@ function toDate(value: WorkSchedule['date']) {
 }
 
 function localDateKey(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  return formatVietnamDate(date)
 }
 
 function mondayKey(date: Date) {
-  const result = new Date(date)
-  const day = result.getDay() || 7
-  result.setDate(result.getDate() - day + 1)
-  result.setHours(0, 0, 0, 0)
-  return localDateKey(result)
+  return vietnamWeekKey(date)
 }
 
 function nextMondayKey() {
-  const now = new Date()
-  const result = new Date(now)
-  const daysUntilNextMonday = ((8 - now.getDay()) % 7) || 7
-  result.setDate(now.getDate() + daysUntilNextMonday)
-  result.setHours(0, 0, 0, 0)
-  return localDateKey(result)
+  return vietnamWeekKey(new Date(), 1)
 }
 
 function activeRegistrationWeekKey(value = new Date()) {
-  const isoWeekday = value.getDay() || 7
-  return registrationTargetsNextWeek(isoWeekday) ? nextMondayKey() : mondayKey(value)
+  return vietnamWeekKey(value, registrationTargetsNextWeek(vietnamIsoWeekday(value)) ? 1 : 0)
 }
 
 function scheduleActivityAt(schedule: ScheduleRow) {
@@ -689,10 +680,10 @@ export default function AdminDashboardPage() {
             </label>
             <p className="mt-1 text-right text-xs text-muted-foreground">{rejectReason.length}/1000</p>
 
-            {new Date().getDay() === 0 && (
+            {rejectingBatch.schedules[0] && resubmissionGraceAvailable(toDate(rejectingBatch.schedules[0].date), toDate(rejectingBatch.schedules[0].firstSubmittedAt || rejectingBatch.schedules[0].createdAt)) && (
               <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 p-3 text-sm leading-5 text-indigo-950 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100">
                 <input type="checkbox" checked={allowSundayResubmissionWithoutPenalty} onChange={(event) => setAllowSundayResubmissionWithoutPenalty(event.target.checked)} className="mt-1 h-4 w-4 accent-indigo-600" />
-                <span><strong>Cho phép nhân viên ghi lại lịch vào Chủ nhật mà không trừ tiền.</strong><br />Nếu không cho phép, lịch gửi lại sẽ áp dụng khoản trừ theo luật hiện tại.</span>
+                <span><strong>Cho phép gửi lại lịch trong hôm nay mà không trừ phí đăng ký trễ.</strong><br />Nếu không cho phép, lịch gửi lại sẽ áp dụng khoản trừ theo luật hiện tại.</span>
               </label>
             )}
 

@@ -31,7 +31,8 @@ import { getManagementSchedulesByDateRange, getSchedulesByDateRange, hasEmployee
 import { getPreviewSchedules } from '@/lib/services/previewWorkflow'
 import { getWeeklyScheduleTarget } from '@/lib/services/managementSettingsService'
 import { AppLoadingScreen } from '@/components/ui/app-loading-screen'
-import { isManagementScheduleRole, registrationTargetsNextWeek } from '@/lib/schedule/registration-policy'
+import { isManagementScheduleRole, registrationTargetsNextWeek, vietnamIsoWeekday } from '@/lib/schedule/registration-policy'
+import { vietnamWeekContaining } from '@/lib/archive/retention'
 import { useNotificationFeed } from '@/components/notifications/notification-feed-provider'
 import { profileImageUrl } from '@/lib/utils/profileImage'
 import { useManagementFactory } from '@/lib/hooks/useManagementFactory'
@@ -145,18 +146,12 @@ export default function Page() {
 
     const loadRegistrationWeek = async () => {
       const now = new Date()
-      const weekday = now.getDay() || 7
-      const currentMonday = new Date(now)
-      currentMonday.setDate(now.getDate() - weekday + 1)
-      currentMonday.setHours(0, 0, 0, 0)
-      const currentSunday = new Date(currentMonday)
-      currentSunday.setDate(currentMonday.getDate() + 6)
-      currentSunday.setHours(23, 59, 59, 999)
-      const nextMonday = new Date(currentMonday)
-      nextMonday.setDate(currentMonday.getDate() + 7)
-      const nextSunday = new Date(nextMonday)
-      nextSunday.setDate(nextMonday.getDate() + 6)
-      nextSunday.setHours(23, 59, 59, 999)
+      const weekday = vietnamIsoWeekday(now)
+      const week = vietnamWeekContaining(now)
+      const currentMonday = week.start
+      const currentSunday = new Date(week.end.getTime() - 1)
+      const nextMonday = week.end
+      const nextSunday = new Date(nextMonday.getTime() + 7 * 24 * 60 * 60 * 1000 - 1)
       const joined = employee.joinDate instanceof Date ? employee.joinDate : employee.joinDate.toDate()
       const appearsNew = Date.now() - joined.getTime() <= 45 * 24 * 60 * 60 * 1000
 

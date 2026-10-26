@@ -1,3 +1,5 @@
+import { formatVietnamDate, vietnamWeekContaining, WEEK_MS } from '@/lib/archive/retention'
+
 export function reactivationWaiverApplies(params: {
   hasPreviousSchedule: boolean
   waiverWeekStart?: unknown
@@ -26,7 +28,7 @@ export function isPastRegistrationDate(dateKey: string, todayKey: string, restri
 
 /** ISO weekday: Monday = 1, ..., Sunday = 7. */
 export function registrationTargetsNextWeek(isoWeekday: number): boolean {
-  return isoWeekday >= 5
+  return isoWeekday >= 6 && isoWeekday <= 7
 }
 
 /** Returns the next Monday after `date`, using Vietnam's calendar date. */
@@ -47,4 +49,49 @@ export function nextMondayKeyInVietnam(date: Date): string {
 
 export function isManagementScheduleRole(role: unknown): boolean {
   return role === 'admin' || role === 'manager' || role === 'director'
+}
+const DAY_MS = 24 * 60 * 60 * 1000
+// Change starts with the next complete registration cycle. Existing penalties
+// and deadlines from earlier work weeks keep their original policy.
+export const SATURDAY_REGISTRATION_FIRST_WEEK = '2026-11-02'
+
+export function vietnamIsoWeekday(date: Date): number {
+  return new Date(date.getTime() + 7 * 60 * 60 * 1000).getUTCDay() || 7
+}
+
+export function vietnamWeekKey(date: Date, offset = 0): string {
+  return formatVietnamDate(new Date(vietnamWeekContaining(date).start.getTime() + offset * WEEK_MS))
+}
+
+export function isCalendarDateKey(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    formatVietnamDate(new Date(`${value}T00:00:00+07:00`)) === value
+}
+
+export function scheduleRegistrationDeadline(firstShift: Date): Date {
+  const week = vietnamWeekContaining(firstShift)
+  return new Date(week.start.getTime() - (week.key < SATURDAY_REGISTRATION_FIRST_WEEK ? DAY_MS : 0))
+}
+
+export function resubmissionGraceAvailable(firstShift: Date, firstSubmittedAt: Date, now = new Date()): boolean {
+  const deadline = scheduleRegistrationDeadline(firstShift)
+  return firstSubmittedAt < deadline && formatVietnamDate(now) === formatVietnamDate(deadline)
+}
+
+export function scheduleFreeEditDeadline(firstShift: Date, firstSubmittedAt: Date): Date {
+  const week = vietnamWeekContaining(firstShift)
+  const deadline = scheduleRegistrationDeadline(firstShift)
+  if (week.key >= SATURDAY_REGISTRATION_FIRST_WEEK) return deadline
+  if (firstSubmittedAt < deadline) return new Date(deadline.getTime() + DAY_MS)
+  return new Date(new Date(`${formatVietnamDate(firstSubmittedAt)}T00:00:00+07:00`).getTime() + DAY_MS)
+}
+
+export function managementScheduleDeadline(firstShift: Date): Date {
+  const week = vietnamWeekContaining(firstShift)
+  return new Date(week.start.getTime() + (week.key < SATURDAY_REGISTRATION_FIRST_WEEK ? 4 : 5) * DAY_MS)
+}
+
+export function isAllowedMaterializationWeek(key: string, now = new Date()): boolean {
+  return isCalendarDateKey(key) && [vietnamWeekKey(now), vietnamWeekKey(now, 1)].includes(key) &&
+    (key === vietnamWeekKey(now) || registrationTargetsNextWeek(vietnamIsoWeekday(now)))
 }

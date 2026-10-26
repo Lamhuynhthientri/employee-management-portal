@@ -47,6 +47,7 @@ import { profileImageUrl } from '@/lib/utils/profileImage'
 import { useManagementContact } from '@/components/providers/management-contact-provider'
 import { subscribeToWeeklyDecisionHistory, type DecisionHistoryItem } from '@/lib/services/decisionHistoryService'
 import { setEmployeeAccountStatus, subscribeToAllEmployees } from '@/lib/services/employeeService'
+import { scheduleRegistrationDeadline, resubmissionGraceAvailable } from '@/lib/schedule/registration-policy'
 import type { Employee } from '@/lib/models/types'
 import { getEmployeeReviewContext } from '@/lib/services/employeeReviewService'
 import { employeeFactoryId } from '@/lib/models/factory'
@@ -91,19 +92,10 @@ function managementShiftLabel(item: Pick<ManagementShift, 'shift' | 'note'>): st
   return custom ? `Tăng ca ${custom[1]}–${custom[2]}` : shiftNames[item.shift]
 }
 
-function startOfWeek(date: Date): Date {
-  const result = new Date(date)
-  const weekday = result.getDay() || 7
-  result.setDate(result.getDate() - weekday + 1)
-  result.setHours(0, 0, 0, 0)
-  return result
-}
-
 function SubmissionStamp({ date, targetDates = [] }: { date: Date; targetDates?: Date[] }) {
   const validTargets = targetDates.filter((target) => target.getTime())
   const firstTarget = validTargets.sort((left, right) => left.getTime() - right.getTime())[0]
-  const submittedInTargetWeek = firstTarget && date >= startOfWeek(firstTarget)
-  const warning = date.getDay() === 0 || submittedInTargetWeek
+  const warning = Boolean(firstTarget && date >= scheduleRegistrationDeadline(firstTarget))
   const weekday = date.toLocaleDateString('vi-VN', { weekday: 'long' })
   const dayAndTime = `${date.toLocaleDateString('vi-VN')} · ${date.toLocaleTimeString('vi-VN', {
     hour: '2-digit',
@@ -908,10 +900,10 @@ export default function NotificationsPage() {
                     <textarea value={reviewNotes[selectedPending.id] || ''} onChange={(event) => setReviewNotes((current) => ({ ...current, [selectedPending.id]: event.target.value }))} placeholder="Nhập lý do để gửi cho nhân viên…" rows={3} className="mt-3 w-full resize-none rounded-2xl border border-rose-200 bg-white px-4 py-3 text-base leading-6 outline-none focus:border-rose-500 dark:border-rose-500/30 dark:bg-slate-900" />
                   </section>
                 )}
-                {rejectIntentId !== selectedPending.id && selectedPending.type === 'schedule' && new Date().getDay() === 0 && (
+                {selectedPending.type === 'schedule' && resubmissionGraceAvailable(selectedPending.referenceDate, selectedPending.createdAt) && (
                   <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 p-3 text-sm leading-5 text-indigo-950 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100">
                     <input type="checkbox" checked={allowSundayResubmissionWithoutPenalty} onChange={(event) => setAllowSundayResubmissionWithoutPenalty(event.target.checked)} className="mt-1 h-4 w-4 accent-indigo-600" />
-                    <span><strong>Cho phép nhân viên ghi lại lịch vào Chủ nhật mà không trừ tiền.</strong><br />Nếu không cho phép, lịch gửi lại sẽ áp dụng khoản trừ theo luật hiện tại.</span>
+                    <span><strong>Cho phép gửi lại lịch trong hôm nay mà không trừ phí đăng ký trễ.</strong><br />Nếu không cho phép, lịch gửi lại sẽ áp dụng khoản trừ theo luật hiện tại.</span>
                   </label>
                 )}
                 {rejectIntentId === selectedPending.id ? (

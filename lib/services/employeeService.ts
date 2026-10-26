@@ -12,50 +12,10 @@ import { auth } from '@/lib/firebase'
 import { Employee, EmployeeScheduleMode } from '@/lib/models/types'
 import { REGISTRATION_FACTORY_STORAGE_KEY, isFactoryId, type FactoryId, type FactoryManagerSeat } from '@/lib/models/factory'
 import { callWorkflowApi, newWorkflowRequestId } from '@/lib/services/workflowApi'
+import { cacheEmployee } from '@/lib/cache/employee-cache'
+export { getCachedEmployee } from '@/lib/cache/employee-cache'
 
 const EMPLOYEES_COLLECTION = 'employees'
-const EMPLOYEE_CACHE_PREFIX = 'tricandy:employee-cache:'
-
-function dateToISOString(value: Employee['joinDate']): string {
-  return value instanceof Date ? value.toISOString() : value.toDate().toISOString()
-}
-
-function cacheEmployee(uid: string, employee: Employee | null): void {
-  if (typeof window === 'undefined') return
-  try {
-    const key = `${EMPLOYEE_CACHE_PREFIX}${uid}`
-    if (!employee) {
-      window.localStorage.removeItem(key)
-      return
-    }
-    window.localStorage.setItem(key, JSON.stringify({
-      ...employee,
-      joinDate: dateToISOString(employee.joinDate),
-      createdAt: dateToISOString(employee.createdAt),
-      updatedAt: dateToISOString(employee.updatedAt),
-    }))
-  } catch {
-    // Local storage is only a startup optimization; Firestore remains the source of truth.
-  }
-}
-
-export function getCachedEmployee(uid: string): Employee | null {
-  if (typeof window === 'undefined') return null
-  try {
-    const raw = window.localStorage.getItem(`${EMPLOYEE_CACHE_PREFIX}${uid}`)
-    if (!raw) return null
-    const value = JSON.parse(raw) as Employee
-    if (!value || value.uid !== uid || typeof value.fullName !== 'string') return null
-    return {
-      ...value,
-      joinDate: new Date(String(value.joinDate)),
-      createdAt: new Date(String(value.createdAt)),
-      updatedAt: new Date(String(value.updatedAt)),
-    }
-  } catch {
-    return null
-  }
-}
 
 /**
  * Get employee by UID

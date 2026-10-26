@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     }
 
     const [advanceSnapshot, employeeSnapshot] = await Promise.all([
-      adminDb.collection('salaryAdvances').get(),
+      adminDb.collection('salaryAdvances').where('status', '==', 'Approved').get(),
       adminDb.collection('employees').get(),
     ])
     const employees = new Map(employeeSnapshot.docs.map((item) => [item.id, item.data()]))

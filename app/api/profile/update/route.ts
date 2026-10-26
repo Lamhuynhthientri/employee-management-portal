@@ -5,6 +5,7 @@ import { adminAuth, adminDb } from '@/lib/server/firebase-admin'
 import { invalidateMonthDataCache } from '@/lib/server/month-data-cache'
 import { DEFAULT_PROFILE_IMAGE, isProfileImageUrl } from '@/lib/utils/profileImage'
 import { syncManagementContactForProfile } from '@/lib/server/management-contact'
+import { readJsonBody } from '@/lib/server/request-limits'
 
 export const runtime = 'nodejs'
 
@@ -44,7 +45,7 @@ function bankAccountValue(value: unknown): string {
 export async function POST(request: Request) {
   try {
     const actor = await authenticateRequest(request)
-    const body = objectBody(await request.json())
+    const body = objectBody(await readJsonBody(request, 8192))
     const unexpectedKey = Object.keys(body).find((key) => !profileKeys.has(key))
     if (unexpectedKey) throw new ApiError(400, `Không được cập nhật trường ${unexpectedKey}.`)
 

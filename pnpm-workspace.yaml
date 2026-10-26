@@ -9,3 +9,10 @@ allowBuilds:
 overrides:
   hono: 4.12.25
   jwks-rsa: 3.2.2
+  brace-expansion@1: 1.1.21
+  brace-expansion@2: 2.1.7
+  '@grpc/grpc-js': 1.14.5
+  '@fastify/busboy@3': 3.2.2
+  browserslist: 4.28.7
+  baseline-browser-mapping: 2.11.0
+  source-map-js: 1.2.2

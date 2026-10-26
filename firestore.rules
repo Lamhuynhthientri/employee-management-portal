@@ -60,6 +60,12 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/employees/$(request.auth.uid));
     }
 
+    function hasActiveEmployeeProfile() {
+      let profile = get(/databases/$(database)/documents/employees/$(request.auth.uid)).data;
+      return hasEmployeeProfile() && profile.status == 'active' &&
+        (!('sessionsValidAfter' in profile) || request.auth.token.auth_time > profile.sessionsValidAfter);
+    }
+
     function currentRole() {
       return get(
         /databases/$(database)/documents/employees/$(request.auth.uid)
@@ -67,20 +73,16 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return hasEmployeeProfile() && currentRole() == 'admin';
+      return hasActiveEmployeeProfile() && currentRole() == 'admin';
     }
 
     function isManagerOrAdmin() {
-      return hasEmployeeProfile() &&
+      return hasActiveEmployeeProfile() &&
         currentRole() in ['manager', 'admin'];
     }
 
     function isDirector() {
-      return hasEmployeeProfile() && currentRole() == 'director';
-    }
-
-    function isManagementReader() {
-      return isManagerOrAdmin() || isDirector();
+      return hasActiveEmployeeProfile() && currentRole() == 'director';
     }
 
     function currentFactoryId() {
@@ -89,7 +91,9 @@ service cloud.firestore {
     }
 
     function resourceFactoryId() {
-      return ('factoryId' in resource.data) ? resource.data.factoryId : 'factory-1';
+      // A default/ternary here cannot safely constrain collection queries.
+      // Legacy documents must be migrated explicitly before enforcement.
+      return resource.data.factoryId;
     }
 
     function canReadFactoryResource() {
@@ -97,7 +101,7 @@ service cloud.firestore {
     }
 
     function ownsResource(fieldName) {
-      return isAuthenticated() &&
+      return isAuthenticated() && hasActiveEmployeeProfile() &&
         resource.data[fieldName] == request.auth.uid;
     }
 
@@ -173,13 +177,13 @@ service cloud.firestore {
           'role', 'status', 'joinDate', 'createdAt', 'updatedAt'
         ]) &&
         data.keys().hasOnly([
-          'uid', 'employeeCode', 'fullName', 'phone', 'email',
+          'uid', 'employeeCode', 'fullName', 'phone', 'email', 'factoryId',
           'photoURL', 'facebookUrl', 'bankName', 'bankAccountName', 'bankAccountNumber',
           'role', 'status', 'joinDate', 'createdAt', 'updatedAt',
           'scheduleMode', 'scheduleModeEffectiveWeekStart', 'fixedScheduleNeedsSetupWeekStart', 'fixedScheduleTemplateWeekStart',
           'scheduleModeInitialSelectionDeadlineAt', 'scheduleModeInitialSelectionCompletedAt', 'scheduleModeChangeCooldownUntil',
           'hasSubmittedSchedule', 'reactivatedAt', 'reactivationScheduleWaiverWeekStart',
-          'statusChangedBy', 'statusChangedAt', 'roleChangedBy', 'roleChangedAt'
+          'statusChangedBy', 'statusChangedAt', 'roleChangedBy', 'roleChangedAt', 'sessionsValidAfter'
         ]) &&
         validString(data.uid, 1, 128) &&
         validEmployeeCode(data) &&
@@ -206,6 +210,7 @@ service cloud.firestore {
         (!('statusChangedAt' in data) || data.statusChangedAt is timestamp) &&
         (!('roleChangedBy' in data) || validString(data.roleChangedBy, 1, 128)) &&
         (!('roleChangedAt' in data) || data.roleChangedAt is timestamp) &&
+        (!('sessionsValidAfter' in data) || (data.sessionsValidAfter is int && data.sessionsValidAfter >= 0)) &&
         data.joinDate is timestamp &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -235,34 +240,14 @@ service cloud.firestore {
           'employeeId', 'title', 'message', 'type',
           'isRead', 'createdAt'
         ]) &&
-        data.keys().hasOnly([
-          'employeeId', 'title', 'message', 'type',
-          'isRead', 'createdAt'
-        ]) &&
+        // Server-generated metadata is immutable, but may remain on the doc.
+        data.diff(resource.data).affectedKeys().hasOnly(['isRead']) &&
         validString(data.employeeId, 1, 128) &&
         validString(data.title, 1, 150) &&
         validString(data.message, 1, 2000) &&
         data.type in ['info', 'success', 'warning', 'error'] &&
         data.isRead is bool &&
         data.createdAt is timestamp;
-    }
-
-    function validNotificationDevice(data) {
-      return data.keys().hasAll([
-          'employeeId', 'fid', 'platform', 'permission',
-          'createdAt', 'updatedAt', 'lastSeenAt'
-        ]) &&
-        data.keys().hasOnly([
-          'employeeId', 'fid', 'platform', 'permission',
-          'createdAt', 'updatedAt', 'lastSeenAt'
-        ]) &&
-        validString(data.employeeId, 1, 128) &&
-        validString(data.fid, 1, 256) &&
-        validString(data.platform, 1, 300) &&
-        data.permission == 'granted' &&
-        data.createdAt is timestamp &&
-        data.updatedAt is timestamp &&
-        recentTimestamp(data.lastSeenAt);
     }
 
     // ===============================================================
@@ -277,10 +262,11 @@ service cloud.firestore {
       allow update: if validEmployee(request.resource.data) &&
         timestampsValidOnUpdate(request.resource.data) &&
         uidNotModified() &&
+        uidUnchanged() &&
         request.resource.data.uid == resource.data.uid &&
         (
           (
-            isDocOwner() &&
+            isDocOwner() && hasActiveEmployeeProfile() &&
             request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly([
                 'fullName', 'phone', 'photoURL', 'facebookUrl',
@@ -338,7 +324,7 @@ service cloud.firestore {
     }
 
     match /companyRules/{ruleId} {
-      allow read: if isAuthenticated() &&
+      allow read: if isAuthenticated() && hasActiveEmployeeProfile() &&
         (resource.data.isActive == true || isAdmin());
 
       allow create: if isAdmin() &&
@@ -357,11 +343,9 @@ service cloud.firestore {
       allow create: if false;
 
       allow update: if ownsResource('employeeId') &&
-        validNotification(request.resource.data) &&
-        request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['isRead']);
+        validNotification(request.resource.data);
 
-      allow delete: if ownsResource('employeeId') || isAdmin();
+      allow delete: if ownsResource('employeeId');
     }
 
     match /workflowRequests/{requestId} {
@@ -373,7 +357,10 @@ service cloud.firestore {
     }
 
     match /auditEvents/{eventId} {
-      allow read: if ownsResource('subjectEmployeeId') || isManagementReader();
+      // No default factory fallback for legacy audits: an unscoped event may
+      // contain payloads from either branch. Host and the subject retain access.
+      allow read: if ownsResource('subjectEmployeeId') || isDirector() ||
+        (isManagerOrAdmin() && 'factoryId' in resource.data && resource.data.factoryId == currentFactoryId());
       allow create, update, delete: if false;
     }
 
@@ -390,24 +377,10 @@ service cloud.firestore {
     }
 
     match /employees/{uid}/notificationDevices/{fid} {
-      allow read: if isOwner(uid);
-
-      allow create: if isOwner(uid) &&
-        validNotificationDevice(request.resource.data) &&
-        timestampsValidOnCreate(request.resource.data) &&
-        request.resource.data.employeeId == uid &&
-        request.resource.data.fid == fid;
-
-      allow update: if isOwner(uid) &&
-        validNotificationDevice(request.resource.data) &&
-        timestampsValidOnUpdate(request.resource.data) &&
-        request.resource.data.fid == resource.data.fid &&
-        request.resource.data.employeeId == uid &&
-        resource.data.employeeId == uid &&
-        request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['platform', 'permission', 'updatedAt', 'lastSeenAt']);
-
-      allow delete: if isOwner(uid);
+      allow read: if isOwner(uid) && hasActiveEmployeeProfile();
+      // Server transaction enforces an account-wide maximum of five devices.
+      allow create, update: if false;
+      allow delete: if isOwner(uid) && hasActiveEmployeeProfile();
     }
 
     match /{document=**} {

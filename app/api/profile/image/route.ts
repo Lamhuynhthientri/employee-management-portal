@@ -11,6 +11,8 @@ import {
 } from '@/lib/server/google-drive-archive'
 import { invalidateMonthDataCache } from '@/lib/server/month-data-cache'
 import { syncManagementContactForProfile } from '@/lib/server/management-contact'
+import { claimProfileUpload } from '@/lib/server/profile-upload-guard'
+import { limitBurst, readRequestBytes } from '@/lib/server/request-limits'
 
 export const runtime = 'nodejs'
 
@@ -30,11 +32,16 @@ export async function POST(request: Request) {
   try {
     const authorization = request.headers.get('authorization')
     if (!authorization?.startsWith('Bearer ')) throw new ApiError(401, 'Bạn cần đăng nhập để tải ảnh.')
-    const token = await adminAuth.verifyIdToken(authorization.slice(7), true)
+    let token
+    try { token = await adminAuth.verifyIdToken(authorization.slice(7), true) }
+    catch { throw new ApiError(401, 'Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.') }
+    limitBurst(`avatar:${token.uid}`, 5)
     const profileRef = adminDb.collection('employees').doc(token.uid)
     const profile = await profileRef.get()
-    const profileData = profile.data()
-    const form = await request.formData()
+    let profileData = profile.data()
+    // Reject oversized streamed bodies, including when Content-Length is absent.
+    const body = await readRequestBytes(request, 6 * 1024 * 1024)
+    const form = await new Response(Buffer.from(body), { headers: { 'content-type': request.headers.get('content-type') || '' } }).formData()
     const image = form.get('image')
     if (!(image instanceof File)) {
       return NextResponse.json({ error: 'Vui lòng chọn một ảnh.' }, { status: 400 })
@@ -46,17 +53,30 @@ export async function POST(request: Request) {
     if (!hasValidSignature(bytes, image.type)) {
       return NextResponse.json({ error: 'Nội dung tệp không đúng định dạng ảnh.' }, { status: 400 })
     }
+    await claimProfileUpload(token)
+    let optimized: Buffer
+    try {
+      optimized = await sharp(Buffer.from(bytes), { limitInputPixels: 64_000_000, animated: false })
+        .rotate().resize(512, 512, { fit: 'cover', withoutEnlargement: true }).webp({ quality: 82 }).toBuffer()
+    } catch { throw new ApiError(400, 'Ảnh bị lỗi hoặc vượt giới hạn kích thước. Vui lòng chọn ảnh khác.') }
     const uploadedFile = await storeProfileImage({
       employeeId: token.uid,
-      contentType: image.type as 'image/jpeg' | 'image/png' | 'image/webp',
-      bytes: Buffer.from(bytes),
+      contentType: 'image/webp',
+      bytes: optimized,
     })
     const displayUrl = new URL('/api/profile/image', request.url)
     displayUrl.searchParams.set('fileId', uploadedFile.id)
     const photoURL = displayUrl.toString()
 
     try {
-      if (profile.exists) await profileRef.update({ photoURL, updatedAt: FieldValue.serverTimestamp() })
+      if (profile.exists) await adminDb.runTransaction(async (transaction) => {
+        const latest = await transaction.get(profileRef)
+        if (!latest.exists || !['active', 'pending'].includes(String(latest.get('status')))) throw new ApiError(403, 'Tài khoản không được phép đổi ảnh.')
+        const validAfter = latest.get('sessionsValidAfter')
+        if (typeof validAfter === 'number' && token.auth_time <= validAfter) throw new ApiError(401, 'Vui lòng đăng nhập lại.')
+        profileData = latest.data()
+        transaction.update(profileRef, { photoURL, updatedAt: FieldValue.serverTimestamp() })
+      })
     } catch (error) {
       await deleteProfileImage(token.uid, uploadedFile.id).catch((cleanupError) => {
         console.error('Failed to roll back a new Google Drive profile image:', cleanupError)
@@ -97,7 +117,7 @@ export async function GET(request: Request) {
   try {
     const fileId = new URL(request.url).searchParams.get('fileId') || ''
     const image = await readProfileImage(fileId)
-    const optimized = await sharp(image.bytes)
+    const optimized = await sharp(image.bytes, { limitInputPixels: 64_000_000, animated: false })
       .rotate()
       .resize(256, 256, { fit: 'cover', position: 'centre', withoutEnlargement: true })
       .webp({ quality: 80, effort: 3 })

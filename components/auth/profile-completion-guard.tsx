@@ -7,9 +7,9 @@ import { useAuth } from '@/lib/hooks/useAuth'
 export function ProfileCompletionGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const { authUser, employee, isLoading, isPreviewMode } = useAuth()
+  const { authUser, employee, isLoading, isPreviewMode, profileReady } = useAuth()
   const exempt = pathname.startsWith('/auth/') || pathname === '/profile/setup'
-  const incomplete = !!authUser && !isPreviewMode && (
+  const incomplete = profileReady && !!authUser && !isPreviewMode && (
     !employee ||
     !employee.fullName?.trim() ||
     !employee.employeeCode?.trim() ||

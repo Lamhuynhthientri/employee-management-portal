@@ -16,13 +16,13 @@ export function MonthNavigator({ value, onChange, loading = false }: {
   return (
     <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
       <div className="flex items-center justify-between">
-        <button type="button" onClick={() => onChange(shiftMonth(value, -1))} aria-label="Tháng trước" className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"><ChevronLeft className="h-4 w-4" /></button>
-        <label className="relative min-w-0 cursor-pointer px-3 text-center">
+        <button type="button" onClick={() => onChange(shiftMonth(value, -1))} aria-label="Tháng trước" className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"><ChevronLeft className="h-4 w-4" /></button>
+        <label className="relative min-h-11 min-w-0 cursor-pointer px-3 py-1 text-center">
           <span className="flex items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Dữ liệu theo tháng {loading && <Loader2 className="h-3 w-3 animate-spin" />}</span>
           <span className="mt-0.5 block text-sm font-black">Tháng {Number(value.slice(5))}/{value.slice(0, 4)}</span>
           <input type="month" value={value} onChange={(event) => event.target.value && onChange(event.target.value)} aria-label="Chọn tháng dữ liệu" className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
         </label>
-        <button type="button" onClick={() => onChange(shiftMonth(value, 1))} aria-label="Tháng sau" className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"><ChevronRight className="h-4 w-4" /></button>
+        <button type="button" onClick={() => onChange(shiftMonth(value, 1))} aria-label="Tháng sau" className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"><ChevronRight className="h-4 w-4" /></button>
       </div>
     </div>
   )

@@ -7,6 +7,7 @@ import { operationalEmailConfigured, sendOperationalEmail } from '@/lib/server/a
 import { requireManager, type RequestActor } from '@/lib/server/api-auth'
 import type { OperationalHealthSnapshot, OperationalIssue, OperationalServiceStatus, OperationalSeverity } from '@/lib/models/operationalHealth'
 import { overallHealthLevel, quotaHealthLevel } from '@/lib/operations/health-policy'
+import { firestoreQuotaPeriodStart } from '@/lib/operations/quota-period'
 export type { OperationalHealthSnapshot, OperationalIssue, OperationalServiceStatus, OperationalSeverity } from '@/lib/models/operationalHealth'
 
 type MonitoringPoint = { value?: { int64Value?: string; doubleValue?: number }; interval?: { endTime?: string } }
@@ -43,7 +44,12 @@ function formatBytes(value: number): string {
 async function monitoringSeries(metricType: string, start: Date, end: Date, extraFilter = ''): Promise<MonitoringSeries[]> {
   const projectId = firebaseAdminProjectId()
   const accessToken = await firebaseAdminAccessToken()
-  const filter = [`metric.type = "${metricType}"`, extraFilter].filter(Boolean).join(' AND ')
+  const filter = [
+    `metric.type = "${metricType}"`,
+    'resource.type = "firestore.googleapis.com/Database"',
+    'resource.labels.database_id = "(default)"',
+    extraFilter,
+  ].filter(Boolean).join(' AND ')
   const output: MonitoringSeries[] = []
   let pageToken = ''
   for (let page = 0; page < 5; page += 1) {
@@ -67,6 +73,7 @@ async function monitoringSeries(metricType: string, start: Date, end: Date, extr
     pageToken = body?.nextPageToken || ''
     if (!pageToken) break
   }
+  if (pageToken) throw new Error('Monitoring trả quá nhiều chuỗi số liệu; kết quả chưa đầy đủ.')
   return output
 }
 
@@ -86,43 +93,45 @@ function latestGauge(series: MonitoringSeries[]): number {
 async function checkFirestore(now: Date): Promise<{ status: OperationalServiceStatus; issues: OperationalIssue[] }> {
   // This read verifies the Admin SDK before querying external metrics.
   await adminDb.collection('systemHealth').doc('current').get()
-  const start = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const start = firestoreQuotaPeriodStart(now)
   const storageStart = new Date(now.getTime() - 6 * 60 * 60 * 1000)
   const [reads, writes, deletes, storage, deniedRules, requests] = await Promise.all([
-    monitoringSeries('firestore.googleapis.com/document/read_count', start, now),
-    monitoringSeries('firestore.googleapis.com/document/write_count', start, now),
-    monitoringSeries('firestore.googleapis.com/document/delete_count', start, now),
+    monitoringSeries('firestore.googleapis.com/document/read_ops_count', start, now),
+    monitoringSeries('firestore.googleapis.com/document/write_ops_count', start, now),
+    monitoringSeries('firestore.googleapis.com/document/delete_ops_count', start, now),
     monitoringSeries('firestore.googleapis.com/storage/data_and_index_storage_bytes', storageStart, now),
     monitoringSeries('firestore.googleapis.com/rules/evaluation_count', start, now, 'metric.labels.result = "DENY"'),
     monitoringSeries('firestore.googleapis.com/api/request_count', start, now),
   ])
   const metrics = {
-    reads24h: sumSeries(reads),
-    writes24h: sumSeries(writes),
-    deletes24h: sumSeries(deletes),
-    storageBytes: latestGauge(storage),
+    quotaPeriodStart: start.toISOString(),
+    readsSinceReset: reads.length ? sumSeries(reads) : null,
+    writesSinceReset: writes.length ? sumSeries(writes) : null,
+    deletesSinceReset: deletes.length ? sumSeries(deletes) : null,
+    storageBytes: storage.length ? latestGauge(storage) : null,
     deniedRules24h: sumSeries(deniedRules),
     resourceExhausted24h: sumSeries(requests.filter((row) =>
       /resource_exhausted|quota|429/i.test(String(row.metric?.labels?.response_code || ''))
     )),
   }
   const levels = [
-    quotaHealthLevel(metrics.reads24h, freeTierLimits.reads),
-    quotaHealthLevel(metrics.writes24h, freeTierLimits.writes),
-    quotaHealthLevel(metrics.deletes24h, freeTierLimits.deletes),
-    quotaHealthLevel(metrics.storageBytes, freeTierLimits.storageBytes),
+    quotaHealthLevel(metrics.readsSinceReset ?? Number.NaN, freeTierLimits.reads),
+    quotaHealthLevel(metrics.writesSinceReset ?? Number.NaN, freeTierLimits.writes),
+    quotaHealthLevel(metrics.deletesSinceReset ?? Number.NaN, freeTierLimits.deletes),
+    quotaHealthLevel(metrics.storageBytes ?? Number.NaN, freeTierLimits.storageBytes),
     metrics.resourceExhausted24h > 0 ? 'critical' : 'healthy',
     metrics.deniedRules24h >= 100 ? 'warning' : 'healthy',
   ] satisfies OperationalSeverity[]
   const severity = overallHealthLevel(levels)
   const issues: OperationalIssue[] = []
   const quotaItems = [
-    ['reads', 'lượt đọc', metrics.reads24h, freeTierLimits.reads],
-    ['writes', 'lượt ghi', metrics.writes24h, freeTierLimits.writes],
-    ['deletes', 'lượt xóa', metrics.deletes24h, freeTierLimits.deletes],
+    ['reads', 'lượt đọc', metrics.readsSinceReset, freeTierLimits.reads],
+    ['writes', 'lượt ghi', metrics.writesSinceReset, freeTierLimits.writes],
+    ['deletes', 'lượt xóa', metrics.deletesSinceReset, freeTierLimits.deletes],
     ['storage', 'dung lượng', metrics.storageBytes, freeTierLimits.storageBytes],
   ] as const
   quotaItems.forEach(([code, label, value, limit]) => {
+    if (value === null) return
     const itemSeverity = quotaHealthLevel(value, limit)
     if (itemSeverity !== 'warning' && itemSeverity !== 'critical') return
     issues.push({
@@ -144,7 +153,7 @@ async function checkFirestore(now: Date): Promise<{ status: OperationalServiceSt
   return {
     status: {
       service: 'firestore', severity, title: 'Firebase / Firestore',
-      message: `${formatNumber(metrics.reads24h)} đọc · ${formatNumber(metrics.writes24h)} ghi · ${formatNumber(metrics.deletes24h)} xóa / 24h · ${formatBytes(metrics.storageBytes)} dữ liệu.`,
+      message: `${metrics.readsSinceReset === null ? 'Chưa đo được' : formatNumber(metrics.readsSinceReset)} đọc · ${metrics.writesSinceReset === null ? 'Chưa đo được' : formatNumber(metrics.writesSinceReset)} ghi · ${metrics.deletesSinceReset === null ? 'Chưa đo được' : formatNumber(metrics.deletesSinceReset)} xóa từ lần reset quota Pacific · ${metrics.storageBytes === null ? 'Chưa đo được dung lượng' : formatBytes(metrics.storageBytes)}. Số liệu có độ trễ.`,
       metrics,
     },
     issues,
@@ -237,11 +246,6 @@ async function checkJobs(now: Date): Promise<{ statuses: OperationalServiceStatu
   }
 }
 
-async function operationalRecipients(): Promise<string[]> {
-  const snapshot = await adminDb.collection('employees').where('role', 'in', ['admin', 'manager', 'director']).get()
-  return snapshot.docs.filter((item) => item.get('status') === 'active').map((item) => item.id)
-}
-
 async function notifyIssue(issue: OperationalIssue): Promise<void> {
   const alertRef = adminDb.collection('operationalAlerts').doc(`${issue.service}-${issue.code}`)
   const now = Timestamp.now()
@@ -263,21 +267,8 @@ async function notifyIssue(issue: OperationalIssue): Promise<void> {
     return notify
   })
   if (!shouldNotify) return
-  const recipients = await operationalRecipients()
-  const batch = adminDb.batch()
-  recipients.forEach((employeeId) => batch.set(
-    adminDb.collection('notifications').doc(`operations-${employeeId}-${issue.service}-${issue.code}-${now.toDate().toISOString().slice(0, 13)}`),
-    {
-      employeeId,
-      title: issue.title,
-      message: issue.message,
-      type: issue.severity === 'critical' ? 'error' : 'warning',
-      isRead: false,
-      createdAt: now,
-    },
-    { merge: true }
-  ))
-  if (recipients.length) await batch.commit()
+  // Technical alerts stay in Settings and the configured operations email.
+  // They must not add cards to staff/management notification feeds.
   try {
     await sendOperationalEmail({
       subject: `[${issue.severity === 'critical' ? 'KHẨN CẤP' : 'CẢNH BÁO'}] ${issue.title}`,
@@ -330,7 +321,7 @@ function failedService(service: OperationalIssue['service'], title: string, erro
       ? 'Service account cần quyền Monitoring Viewer và Monitoring API phải được bật.'
       : message,
   }
-  return { status: { service, severity: issue.severity, title, message: issue.message }, issue }
+  return { status: { service, severity: permissionProblem ? 'unknown' : issue.severity, title, message: issue.message }, issue }
 }
 
 export async function runOperationalHealthCheck(now = new Date()): Promise<OperationalHealthSnapshot> {
@@ -380,7 +371,12 @@ export async function runOperationalHealthCheck(now = new Date()): Promise<Opera
   return getOperationalHealthSnapshot()
 }
 
+const lastFailureReport = new Map<string, number>()
+
 export async function reportOperationalFailure(issue: OperationalIssue): Promise<void> {
+  const key = `${issue.service}-${issue.code}`
+  if (Date.now() - (lastFailureReport.get(key) || 0) < 5 * 60 * 1000) return
+  lastFailureReport.set(key, Date.now())
   try {
     await notifyIssue(issue)
   } catch (error) {
@@ -435,5 +431,7 @@ export async function getOperationalHealth(actor: RequestActor): Promise<Operati
 
 export async function runOperationalHealthNow(actor: RequestActor): Promise<OperationalHealthSnapshot> {
   requireManager(actor)
+  const current = await getOperationalHealthSnapshot()
+  if (current.checkedAt && Date.now() - new Date(current.checkedAt).getTime() < 15 * 60 * 1000) return current
   return runOperationalHealthCheck()
 }

@@ -3,6 +3,9 @@ import 'server-only'
 import type { DecodedIdToken } from 'firebase-admin/auth'
 import { adminAuth, adminDb } from '@/lib/server/firebase-admin'
 import { isFactoryId, type FactoryId } from '@/lib/models/factory'
+import { ApiError } from '@/lib/server/api-error'
+import { limitBurst } from '@/lib/server/request-limits'
+export { ApiError } from '@/lib/server/api-error'
 
 export type AppRole = 'admin' | 'manager' | 'director' | 'employee'
 
@@ -11,15 +14,6 @@ export interface RequestActor {
   uid: string
   role: AppRole
   factoryId: FactoryId
-}
-
-export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string
-  ) {
-    super(message)
-  }
 }
 
 export async function authenticateRequest(request: Request): Promise<RequestActor> {
@@ -35,6 +29,7 @@ export async function authenticateRequest(request: Request): Promise<RequestActo
     throw new ApiError(401, 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.')
   }
 
+  limitBurst(`api:${token.uid}`, 180)
   const profile = await adminDb.collection('employees').doc(token.uid).get()
   if (!profile.exists) {
     throw new ApiError(403, 'Tài khoản chưa có hồ sơ nhân viên.')
@@ -45,10 +40,15 @@ export async function authenticateRequest(request: Request): Promise<RequestActo
     throw new ApiError(403, 'Tài khoản không hoạt động hoặc chưa được phân quyền.')
   }
 
-  if (['employee', 'director'].includes(role) && profile.get('status') !== 'active') {
+  if (profile.get('status') !== 'active') {
     throw new ApiError(403, profile.get('status') === 'inactive'
       ? 'Tài khoản đã bị vô hiệu hóa. Vui lòng liên hệ quản lý.'
       : 'Hồ sơ đang chờ admin duyệt. Tiện ích sẽ mở sau khi được chấp nhận.')
+  }
+
+  const sessionsValidAfter = profile.get('sessionsValidAfter')
+  if (typeof sessionsValidAfter === 'number' && token.auth_time <= sessionsValidAfter) {
+    throw new ApiError(401, 'Phiên đăng nhập đã bị thu hồi. Vui lòng đăng nhập lại.')
   }
 
   const rawFactoryId = profile.get('factoryId')
@@ -70,4 +70,8 @@ export function requireManager(actor: RequestActor): void {
   if (!['manager', 'director', 'admin'].includes(actor.role)) {
     throw new ApiError(403, 'Chỉ quản lý hoặc admin được xử lý yêu cầu.')
   }
+}
+
+export function requireHost(actor: RequestActor): void {
+  if (actor.role !== 'director') throw new ApiError(403, 'Chỉ Host được thực hiện thao tác toàn hệ thống.')
 }

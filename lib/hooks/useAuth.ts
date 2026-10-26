@@ -5,6 +5,7 @@ import { User } from 'firebase/auth'
 import { subscribeToAuthState, convertFirebaseUserToAuthUser, logOut } from '@/lib/services/authService'
 import { getCachedEmployee, getEmployeeByUID, subscribeToEmployeeByUID } from '@/lib/services/employeeService'
 import { AuthUser, Employee } from '@/lib/models/types'
+import { clearAccountCaches } from '@/lib/cache/employee-cache'
 import {
   DEMO_MODE,
   DEMO_USER,
@@ -18,6 +19,7 @@ interface AuthContextType {
   authUser: AuthUser | null
   employee: Employee | null
   isLoading: boolean
+  profileReady: boolean
   isAuthenticated: boolean
   isPreviewMode: boolean
   refreshEmployee: () => Promise<void>
@@ -33,6 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const [employee, setEmployee] = useState<Employee | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [profileReady, setProfileReady] = useState(false)
   const [demoMode, setDemoMode] = useState(DEMO_MODE)
 
   useEffect(() => {
@@ -60,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         role: previewRole,
       } as Employee)
       setIsLoading(false)
+      setProfileReady(true)
       return
     }
 
@@ -67,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let unsubscribeEmployee: undefined | (() => void)
     const unsubscribe = subscribeToAuthState((firebaseUser: User | null) => {
       setIsLoading(true)
+      setProfileReady(false)
       unsubscribeEmployee?.()
       unsubscribeEmployee = undefined
 
@@ -74,6 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const authUserData = convertFirebaseUserToAuthUser(firebaseUser)
         const cachedEmployee = getCachedEmployee(firebaseUser.uid)
         setAuthUser(authUserData)
+        setEmployee(cachedEmployee)
         if (cachedEmployee) {
           // Render the last known shell immediately while Firestore refreshes it.
           // The live snapshot below remains the source of truth for role/status.
@@ -84,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           firebaseUser.uid,
           (employeeData) => {
             setEmployee(employeeData)
+            setProfileReady(true)
             setIsLoading(false)
           },
           (error) => {
@@ -93,9 +100,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         )
       } else {
+        clearAccountCaches()
         setAuthUser(null)
         setEmployee(null)
         setIsLoading(false)
+        setProfileReady(true)
       }
     })
 
@@ -109,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const handleLogout = async () => {
     try {
       if (demoMode) {
+        clearAccountCaches()
         disablePreviewMode()
         setDemoMode(false)
         setAuthUser(null)
@@ -134,6 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     authUser,
     employee,
     isLoading,
+    profileReady,
     isAuthenticated: !!authUser,
     isPreviewMode: demoMode,
     refreshEmployee,

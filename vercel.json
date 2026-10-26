@@ -7,7 +7,7 @@
     },
     {
       "path": "/api/schedules/fixed/weekly",
-      "schedule": "0 17 * * 4"
+      "schedule": "0 17 * * 5"
     },
     {
       "path": "/api/archive/weekly",

@@ -14,6 +14,7 @@ const PREVIEW_ROLE_SESSION_KEY = 'employee-portal-preview-role'
 export type PreviewRole = 'admin' | 'employee'
 
 export function isPreviewModeEnabled(): boolean {
+  if (process.env.NODE_ENV !== 'development') return false
   if (DEMO_MODE) return true
   if (typeof window === 'undefined') return false
   return window.sessionStorage.getItem(PREVIEW_MODE_SESSION_KEY) === 'true'

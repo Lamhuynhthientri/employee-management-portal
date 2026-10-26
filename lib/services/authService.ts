@@ -10,6 +10,7 @@ import {
 } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { AuthUser } from '@/lib/models/types'
+import { clearAccountCaches } from '@/lib/cache/employee-cache'
 
 export async function assertAccountRegistrationOpen(): Promise<void> {
   const response = await fetch('/api/account-registration', { cache: 'no-store' })
@@ -121,6 +122,7 @@ export async function signInWithGoogle(): Promise<User> {
 export async function logOut(): Promise<void> {
   try {
     await signOut(auth)
+    clearAccountCaches()
   } catch (error) {
     console.error('Error signing out:', error)
     throw error

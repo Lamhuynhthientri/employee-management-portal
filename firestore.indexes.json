@@ -155,5 +155,11 @@
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    { "collectionGroup": "auditEvents", "fieldPath": "payload", "indexes": [] },
+    { "collectionGroup": "auditEvents", "fieldPath": "result", "indexes": [] },
+    { "collectionGroup": "workflowRequests", "fieldPath": "targetIds", "indexes": [] },
+    { "collectionGroup": "securityBudgets", "fieldPath": "*", "indexes": [] },
+    { "collectionGroup": "systemJobLocks", "fieldPath": "*", "indexes": [] }
+  ]
 }

@@ -14,7 +14,7 @@ import { FACTORY_IDS, FACTORY_LABELS, isFactoryId, REGISTRATION_FACTORY_STORAGE_
 
 export default function ProfileSetupPage() {
   const router = useRouter()
-  const { authUser, employee, isLoading, refreshEmployee, logout } = useAuth()
+  const { authUser, employee, isLoading, profileReady, refreshEmployee, logout } = useAuth()
   const [form, setForm] = useState({
     fullName: '',
     employeeCode: '',
@@ -148,6 +148,7 @@ export default function ProfileSetupPage() {
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!authUser) return
+    if (!profileReady) { setMessage('Đang xác nhận hồ sơ. Vui lòng chờ một chút rồi lưu.'); return }
     const values = Object.fromEntries(
       Object.entries(form).map(([key, value]) => [key, value.trim()])
     ) as typeof form

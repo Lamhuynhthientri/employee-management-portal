@@ -5,6 +5,7 @@ import { FieldValue, Timestamp, type DocumentData, type DocumentSnapshot } from 
 import { previousVietnamMonth } from '@/lib/archive/retention'
 import { adminDb } from '@/lib/server/firebase-admin'
 import { storeMonthlyArchive } from '@/lib/server/google-drive-archive'
+import { withJobLease } from '@/lib/server/job-lease'
 
 const FINAL_ADVANCE_STATUSES = new Set(['Approved', 'Rejected', 'Cancelled'])
 
@@ -44,6 +45,10 @@ export interface MonthlyArchiveResult {
 }
 
 export async function runMonthlyArchive(now = new Date()): Promise<MonthlyArchiveResult> {
+  return withJobLease('monthly-archive', () => runLockedMonthlyArchive(now))
+}
+
+async function runLockedMonthlyArchive(now: Date): Promise<MonthlyArchiveResult> {
   const window = previousVietnamMonth(now)
   const manifestRef = adminDb.collection('archiveRuns').doc(`monthly-${window.key}`)
   const existing = await manifestRef.get()
@@ -53,7 +58,7 @@ export async function runMonthlyArchive(now = new Date()): Promise<MonthlyArchiv
 
   if (existing.get('state') === 'verified') {
     const paths = existing.get('documentPaths')
-    if (!Array.isArray(paths) || paths.some((path) => typeof path !== 'string')) throw new Error(`Monthly archive ${window.key} has invalid saved document paths.`)
+    if (!Array.isArray(paths) || paths.some((path) => typeof path !== 'string' || !/^(penalties|salaryAdvances)\/[^/]+$/.test(path))) throw new Error(`Monthly archive ${window.key} has invalid saved document paths.`)
     if (process.env.MONTHLY_ARCHIVE_DELETE_ENABLED !== 'true') {
       return { state: 'verified', archiveKey: window.key, documentCount: Number(existing.get('documentCount') ?? 0), deletedDocumentCount: 0, counts: existing.get('counts') ?? {}, driveFileId: existing.get('driveFileId'), driveWebViewLink: existing.get('driveWebViewLink') }
     }

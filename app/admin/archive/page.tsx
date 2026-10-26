@@ -660,10 +660,10 @@ export default function AdminArchivePage() {
           </section>
         ) : null}
 
-        <details className="group mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        {role === 'director' && <details className="group mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <summary className="flex cursor-pointer list-none items-center gap-3 p-4"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10"><FlaskConical className="h-4 w-4" /></div><div className="min-w-0 flex-1"><h2 className="text-sm font-extrabold">Công cụ kiểm thử</h2><p className="mt-0.5 text-xs text-muted-foreground">Tạo bản thử bằng ngày lùi khi cần kiểm tra.</p></div><ChevronDown className="h-5 w-5 text-slate-400 transition group-open:rotate-180" /></summary>
           <div className="border-t border-slate-100 p-4 dark:border-white/10"><p className="text-xs leading-5 text-muted-foreground">Tạo bù tháng trước dùng đúng quy trình Drive → xác minh → reset. File test tuần không xóa Firebase.</p><button type="button" onClick={() => void createPreviousMonthArchive()} disabled={archivingMonth || isPreviewMode} className="mt-3 flex min-h-12 w-full items-center justify-center rounded-2xl bg-emerald-600 px-4 text-sm font-bold text-white disabled:opacity-50">{archivingMonth ? 'Đang lưu tháng trước...' : 'Lưu tháng trước ngay'}</button><LocalizedDateInput value={testDate} onChange={setTestDate} className="mt-3 min-w-0 !px-4 text-sm" ariaLabel="Ngày tạo bản thử tuần" /><button type="button" onClick={() => void createTestArchive()} disabled={creatingTest || isPreviewMode} className="mt-2 flex min-h-12 w-full items-center justify-center rounded-2xl bg-indigo-600 px-4 text-sm font-bold text-white disabled:opacity-50">{creatingTest ? 'Đang tạo...' : 'Tạo bản thử tuần'}</button></div>
-        </details>
+        </details>}
       </PageContainer>
 
       {filterOpen && (

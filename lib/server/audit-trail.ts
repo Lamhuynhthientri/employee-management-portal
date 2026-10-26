@@ -8,6 +8,7 @@ import { auditEmailConfigured } from '@/lib/server/audit-email'
 
 const READ_ONLY_ACTIONS = new Set([
   'getWeeklyScheduleTarget',
+  'getFactoryManagerSeats',
   'getDutyAvailability',
   'normalizeLeaveRequests',
   'getManagementContact',
@@ -18,6 +19,13 @@ const READ_ONLY_ACTIONS = new Set([
   'getOperationalHealth',
   'runOperationalHealthNow',
 ])
+
+export function workflowNeedsAudit(action: string, result: unknown): boolean {
+  if (READ_ONLY_ACTIONS.has(action)) return false
+  const value = result && typeof result === 'object' ? result as Record<string, unknown> : null
+  if (value?.idempotentReplay === true) return false
+  return action !== 'ensureFixedSchedule' || value?.created === true
+}
 
 const EMAIL_RECEIPT_ACTIONS = new Set([
   'submitSchedules',
@@ -172,7 +180,7 @@ export async function recordCompletedWorkflowAudit(params: {
   payload: Record<string, unknown>
   result: unknown
 }): Promise<void> {
-  if (process.env.AUDIT_TRAIL_ENABLED === 'false' || READ_ONLY_ACTIONS.has(params.action)) return
+  if (process.env.AUDIT_TRAIL_ENABLED === 'false' || !workflowNeedsAudit(params.action, params.result)) return
 
   const subjectId = await subjectEmployeeId(params.actor, params.action, params.payload)
   const eventId = randomUUID()
@@ -196,6 +204,7 @@ export async function recordCompletedWorkflowAudit(params: {
       eventId,
       actorUid: params.actor.uid,
       actorRole: params.actor.role,
+      factoryId: String(employee.get('factoryId') || params.actor.factoryId),
       subjectEmployeeId: subjectId,
       action: params.action,
       payload: normalizedPayload,

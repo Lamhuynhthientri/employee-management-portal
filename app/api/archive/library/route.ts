@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { ApiError, authenticateRequest, requireManager } from '@/lib/server/api-auth'
+import { ApiError, authenticateRequest, requireHost, requireManager } from '@/lib/server/api-auth'
 import { listAllArchives, readArchive } from '@/lib/server/google-drive-archive'
 import { runArchivePreview } from '@/lib/server/weekly-archive'
 import { runMonthlyArchive } from '@/lib/server/monthly-archive'
@@ -7,6 +7,8 @@ import { getCurrentMonthSnapshot } from '@/lib/server/current-month-snapshot'
 import { invalidateMonthDataCache } from '@/lib/server/month-data-cache'
 import { scopeArchivePayload, type ArchivePayload } from '@/lib/server/archive-scope'
 import { resolveFactoryScope } from '@/lib/server/factory-scope'
+import { limitBurst, readJsonBody } from '@/lib/server/request-limits'
+import { isCalendarDateKey } from '@/lib/schedule/registration-policy'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -16,6 +18,7 @@ export async function GET(request: Request) {
   try {
     const actor = await authenticateRequest(request)
     requireManager(actor)
+    limitBurst(`archive-read:${actor.uid}`, 20)
     const searchParams = new URL(request.url).searchParams
     const fileId = searchParams.get('fileId')?.trim()
     const liveMonth = searchParams.get('liveMonth')?.trim()
@@ -47,14 +50,15 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const actor = await authenticateRequest(request)
-    requireManager(actor)
-    const body = await request.json() as { referenceDate?: unknown; action?: unknown }
+    requireHost(actor)
+    limitBurst(`archive-write:${actor.uid}`, 2)
+    const body = await readJsonBody(request, 2048)
     if (body.action === 'archive-previous-month') {
       const result = await runMonthlyArchive()
       invalidateMonthDataCache()
       return NextResponse.json({ ok: true, result })
     }
-    if (typeof body.referenceDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(body.referenceDate)) {
+    if (!isCalendarDateKey(body.referenceDate)) {
       throw new ApiError(400, 'Ngày kiểm thử không hợp lệ.')
     }
     const referenceDate = new Date(`${body.referenceDate}T12:00:00+07:00`)

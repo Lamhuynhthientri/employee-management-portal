@@ -5,6 +5,9 @@ import { isFactoryId } from '@/lib/models/factory'
 import { invalidateMonthDataCache } from '@/lib/server/month-data-cache'
 import { employeeCodeAssignedToAnother, isValidEmployeeCode, normalizeEmployeeCode } from '@/lib/models/employee-code'
 import { DEFAULT_PROFILE_IMAGE, isProfileImageUrl } from '@/lib/utils/profileImage'
+import { ApiError } from '@/lib/server/api-auth'
+import { limitBurst, readJsonBody } from '@/lib/server/request-limits'
+import { legacyEmployeeCodes } from '@/lib/server/legacy-employee-codes'
 
 export const runtime = 'nodejs'
 
@@ -14,15 +17,18 @@ function clean(value: unknown, max: number): string {
 
 export async function POST(request: Request) {
   try {
+    const authorization = request.headers.get('authorization')
+    if (!authorization?.startsWith('Bearer ')) return NextResponse.json({ error: 'Bạn cần đăng nhập.' }, { status: 401 })
+    let token
+    try { token = await adminAuth.verifyIdToken(authorization.slice(7), true) }
+    catch { throw new ApiError(401, 'Phiên đăng nhập không hợp lệ.') }
+    limitBurst(`register:${token.uid}`, 5)
     const registrationSetting = await adminDb.collection('managementSettings').doc('accountRegistration').get()
     const closesAt = registrationSetting.get('closesAt')
     if (registrationSetting.get('isOpen') !== true || !(closesAt instanceof Timestamp) || closesAt.toDate().getTime() <= Date.now()) {
       return NextResponse.json({ error: 'Cổng tạo tài khoản đã đóng. Vui lòng liên hệ admin để được mở lại.' }, { status: 403 })
     }
-    const authorization = request.headers.get('authorization')
-    if (!authorization?.startsWith('Bearer ')) return NextResponse.json({ error: 'Bạn cần đăng nhập.' }, { status: 401 })
-    const token = await adminAuth.verifyIdToken(authorization.slice(7), true)
-    const body = await request.json() as Record<string, unknown>
+    const body = await readJsonBody(request, 8192)
     const employeeCode = normalizeEmployeeCode(body.employeeCode)
     const codeKey = employeeCode
     const fullName = clean(body.fullName, 100)
@@ -55,9 +61,8 @@ export async function POST(request: Request) {
     // Keep the legacy scan only as a migration fallback for old employee
     // profiles that predate employeeCodes reservations.
     if (!reservationSnapshot.exists) {
-      const legacyEmployees = await adminDb.collection('employees').get()
       const codeAlreadyAssigned = employeeCodeAssignedToAnother(
-        legacyEmployees.docs.map((item) => ({ uid: item.id, employeeCode: item.get('employeeCode') })),
+        await legacyEmployeeCodes(),
         employeeCode,
         token.uid,
       )
@@ -108,6 +113,7 @@ export async function POST(request: Request) {
     invalidateMonthDataCache()
     return NextResponse.json({ ok: true, status: 'pending' })
   } catch (error) {
+    if (error instanceof ApiError) return NextResponse.json({ error: error.message }, { status: error.status })
     const message = error instanceof Error && error.message === 'CODE_EXISTS'
       ? 'Mã nhân viên này đã được liên kết với tài khoản khác.'
       : error instanceof Error && error.message === 'PROFILE_EXISTS'
